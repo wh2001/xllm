@@ -60,6 +60,18 @@ constexpr uint32_t BATCH_COPY_MAX_SIZE = 4096;
 constexpr uint32_t TIMEOUT_S = 60;      // second
 constexpr uint32_t TIMEOUT_MS = 60000;  // millisecond
 
+namespace {
+void initialize_fake_parameters(torch::nn::Module& module) {
+  torch::NoGradGuard no_grad;
+  for (auto& param : module.parameters()) {
+    if (!param.defined() || param.numel() == 0) {
+      continue;
+    }
+    param.zero_();
+  }
+}
+}  // namespace
+
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
                        const torch::Device& device,
                        const runtime::Options& options)
@@ -580,6 +592,11 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     return false;
   }
 
+  if (options_.fake_load()) {
+    LOG(WARNING) << "FAKE_LOAD enabled: initializing parameters with dummy "
+                    "values and skipping real weight files.";
+    initialize_fake_parameters(*model_);
+  }
   this->load_model(std::move(model_loader));
 
   status_ = Status::LOADED;

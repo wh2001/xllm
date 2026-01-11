@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "base_loader.h"
 
+#include "common/global_flags.h"
+
 namespace xllm {
 namespace layer {
 
@@ -48,6 +50,10 @@ void BaseLoader::set_weight(const StateDict& state_dict,
   for (const auto& [name, tensor] : state_dict) {
     if (absl::EndsWith(name, tensor_name)) {
       at::Tensor mutable_tensor = tensor;
+      if (FLAGS_FAKE_LOAD && mutable_tensor.defined()) {
+        mutable_tensor =
+            torch::zeros(mutable_tensor.sizes(), mutable_tensor.options());
+      }
       correct_tensor_dtype(mutable_tensor, tensor_name);
       if (to_host) {
         at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
@@ -68,6 +74,10 @@ void BaseLoader::set_weight(const StateDict& state_dict,
     for (const auto& [name, tensor] : state_dict) {
       if (absl::EndsWith(name, tensor_name)) {
         at::Tensor mutable_tensor = tensor;
+        if (FLAGS_FAKE_LOAD && mutable_tensor.defined()) {
+          mutable_tensor =
+              torch::zeros(mutable_tensor.sizes(), mutable_tensor.options());
+        }
         correct_tensor_dtype(mutable_tensor, tensor_name);
         if (to_host) {
           at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
@@ -84,6 +94,10 @@ void BaseLoader::set_weight(const StateDict& state_dict,
             /*dim=*/dim,
             /*rank=*/parallel_args_.rank(),
             /*world_size=*/parallel_args_.world_size());
+        if (FLAGS_FAKE_LOAD && mutable_tensor.defined()) {
+          mutable_tensor =
+              torch::zeros(mutable_tensor.sizes(), mutable_tensor.options());
+        }
         correct_tensor_dtype(mutable_tensor, tensor_name);
         if (to_host) {
           at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
@@ -107,6 +121,10 @@ void BaseLoader::set_weight(const StateDict& state_dict,
     for (const auto& [name, tensor] : state_dict) {
       if (absl::EndsWith(name, tensor_name)) {
         at::Tensor mutable_tensor = tensor;
+        if (FLAGS_FAKE_LOAD && mutable_tensor.defined()) {
+          mutable_tensor =
+              torch::zeros(mutable_tensor.sizes(), mutable_tensor.options());
+        }
         correct_tensor_dtype(mutable_tensor, tensor_name);
         if (to_host) {
           at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
@@ -123,6 +141,10 @@ void BaseLoader::set_weight(const StateDict& state_dict,
                                           /*dim=*/dim,
                                           /*rank=*/rank,
                                           /*world_size=*/world_size);
+        if (FLAGS_FAKE_LOAD && mutable_tensor.defined()) {
+          mutable_tensor =
+              torch::zeros(mutable_tensor.sizes(), mutable_tensor.options());
+        }
         correct_tensor_dtype(mutable_tensor, tensor_name);
         if (to_host) {
           at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);

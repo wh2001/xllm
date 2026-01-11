@@ -59,6 +59,11 @@ DEFINE_string(model_id, "", "hf model name.");
 
 DEFINE_string(model, "", "Name or path of the huggingface model to use.");
 
+DEFINE_bool(FAKE_LOAD,
+            false,
+            "Skip loading model weights and initialize parameters with dummy "
+            "values.");
+
 DEFINE_string(
     backend,
     "",

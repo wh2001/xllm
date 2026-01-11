@@ -38,6 +38,9 @@ struct Options {
   // model backend
   PROPERTY(std::string, backend);
 
+  // skip loading model weights and initialize parameters with dummy values
+  PROPERTY(bool, fake_load) = false;
+
   // devices for execute model
   PROPERTY(std::vector<torch::Device>, devices);
 

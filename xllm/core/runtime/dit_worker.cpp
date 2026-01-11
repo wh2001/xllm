@@ -65,6 +65,16 @@ DiTCacheConfig parse_dit_cache_from_flags() {
   }
   return cache_config;
 }
+
+void initialize_fake_parameters(torch::nn::Module& module) {
+  torch::NoGradGuard no_grad;
+  for (auto& param : module.parameters()) {
+    if (!param.defined() || param.numel() == 0) {
+      continue;
+    }
+    param.zero_();
+  }
+}
 }  // namespace
 
 DiTWorker::DiTWorker(const ParallelArgs& parallel_args,
@@ -89,6 +99,11 @@ bool DiTWorker::init_model(const std::string& model_weights_path) {
 
   dit_model_ = create_dit_model(context_);
   CHECK(dit_model_ != nullptr) << "Failed to create model.";
+  if (options_.fake_load()) {
+    LOG(WARNING) << "FAKE_LOAD enabled: initializing parameters with dummy "
+                    "values and skipping real weight files.";
+    initialize_fake_parameters(*dit_model_);
+  }
   dit_model_->load_model(std::move(loader));
 
   dit_model_executor_ =

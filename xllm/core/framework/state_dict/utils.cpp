@@ -16,6 +16,8 @@ limitations under the License.
 
 #include "utils.h"
 
+#include "common/global_flags.h"
+
 namespace xllm {
 
 namespace weight {
@@ -31,7 +33,14 @@ void load_weight(const StateDict& state_dict,
         << "weight already loaded, name: " << state_dict.prefix() << name;
     CHECK_EQ(weight.sizes(), tensor.sizes())
         << "weight size mismatch for " << state_dict.prefix() << name;
-    weight.copy_(tensor);
+    if (FLAGS_FAKE_LOAD) {
+      weight.zero_();
+    } else {
+      weight.copy_(tensor);
+    }
+    weight_is_loaded = true;
+  } else if (FLAGS_FAKE_LOAD && !weight_is_loaded && weight.defined()) {
+    weight.zero_();
     weight_is_loaded = true;
   }
 }
@@ -48,7 +57,14 @@ void load_sharded_weight(const StateDict& state_dict,
   if (tensor.defined()) {
     CHECK_EQ(weight.sizes(), tensor.sizes())
         << "weight size mismatch for " << state_dict.prefix() << name;
-    weight.copy_(tensor);
+    if (FLAGS_FAKE_LOAD) {
+      weight.zero_();
+    } else {
+      weight.copy_(tensor);
+    }
+    weight_is_loaded = true;
+  } else if (FLAGS_FAKE_LOAD && !weight_is_loaded && weight.defined()) {
+    weight.zero_();
     weight_is_loaded = true;
   }
 }
@@ -68,7 +84,14 @@ void load_sharded_weight(const StateDict& state_dict,
         << "weight already loaded, name: " << state_dict.prefix() << name;
     CHECK_EQ(weight.sizes(), tensor.sizes())
         << "weight size mismatch for " << state_dict.prefix() << name;
-    weight.copy_(tensor);
+    if (FLAGS_FAKE_LOAD) {
+      weight.zero_();
+    } else {
+      weight.copy_(tensor);
+    }
+    weight_is_loaded = true;
+  } else if (FLAGS_FAKE_LOAD && !weight_is_loaded && weight.defined()) {
+    weight.zero_();
     weight_is_loaded = true;
   }
 }
@@ -85,6 +108,15 @@ void load_fused_weight(const StateDict& state_dict,
                        int32_t num_kv_head_replicas) {
   // return if the weight is already loaded
   if (weight_is_loaded) {
+    return;
+  }
+
+  if (FLAGS_FAKE_LOAD) {
+    if (weight.defined()) {
+      weight.zero_();
+    }
+    weight_is_loaded = true;
+    accumulated_tensors.clear();
     return;
   }
 
@@ -173,6 +205,15 @@ void load_moe_weight(const StateDict& state_dict,
     prefixes.emplace_back(expert_id_str + sub_prefix);
   }
 
+  if (FLAGS_FAKE_LOAD) {
+    if (weight.defined()) {
+      weight.zero_();
+    }
+    weight_is_loaded = true;
+    accumulated_tensors.clear();
+    return;
+  }
+
   weight_is_loaded = load_tensor_list(
       state_dict, prefixes, name, dim, rank, world_size, accumulated_tensors);
 
@@ -207,6 +248,15 @@ void load_moe_all_expert_weight(const StateDict& state_dict,
   for (size_t idx = 0; idx < num_total_experts; idx++) {
     std::string expert_id_str = std::to_string(idx) + ".";
     prefixes.emplace_back(expert_id_str + sub_prefix);
+  }
+
+  if (FLAGS_FAKE_LOAD) {
+    if (weight.defined()) {
+      weight.zero_();
+    }
+    weight_is_loaded = true;
+    accumulated_tensors.clear();
+    return;
   }
 
   weight_is_loaded = load_tensor_list(
@@ -250,6 +300,18 @@ void load_moe_fused_weight(const StateDict& state_dict,
   }
 
   const int64_t dim = 0;
+  if (FLAGS_FAKE_LOAD) {
+    if (w13.defined()) {
+      w13.zero_();
+    }
+    w1_is_loaded = true;
+    w3_is_loaded = true;
+    w13_is_loaded = true;
+    w1_tensors.clear();
+    w3_tensors.clear();
+    return;
+  }
+
   if (!w1_is_loaded) {
     w1_is_loaded = load_tensor_list(
         state_dict, w1_prefixes, name, dim, rank, world_size, w1_tensors);
@@ -292,6 +354,17 @@ void load_merged_weight(const StateDict& state_dict,
   }
   const auto& tensor = state_dict.get_tensor(name);
   if (!tensor.defined()) {
+    if (FLAGS_FAKE_LOAD && weight.defined()) {
+      weight.zero_();
+      weight_is_loaded = true;
+    }
+    return;
+  }
+  if (FLAGS_FAKE_LOAD) {
+    if (weight.defined()) {
+      weight.zero_();
+    }
+    weight_is_loaded = true;
     return;
   }
   CHECK_EQ(tensor.size(dim), shard_tensor_count * shard_size * world_size)

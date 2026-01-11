@@ -48,7 +48,8 @@ DiTMaster::DiTMaster(const Options& options)
   runtime::Options eng_options;
   eng_options.model_path(options.model_path())
       .model_id(options.model_id())
-      .devices(devices);
+      .devices(devices)
+      .fake_load(options.fake_load());
 
   engine_ = std::make_unique<DiTEngine>(eng_options);
   CHECK(engine_->init());

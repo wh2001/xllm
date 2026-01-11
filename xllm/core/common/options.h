@@ -48,6 +48,9 @@ class Options {
   // model backend
   PROPERTY(std::string, backend);
 
+  // skip loading model weights and initialize parameters with dummy values
+  PROPERTY(bool, fake_load) = false;
+
   // max image num per prompt, default 4
   PROPERTY(int32_t, limit_image_per_prompt) = 4;
 

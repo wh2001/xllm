@@ -33,6 +33,8 @@ DECLARE_string(model_id);
 
 DECLARE_string(model);
 
+DECLARE_bool(FAKE_LOAD);
+
 DECLARE_string(backend);
 
 DECLARE_string(task);
