@@ -40,6 +40,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/xtensor.h"
 #include "loader/base_loader.h"
+#include "loader/base_manual_loader.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "pytorch/adapter/workspace/workspace.h"
 
@@ -165,6 +166,41 @@ class BaseLayer : public torch::nn::Module {
 
   void correct_tensor_dtype(torch::Tensor& tensor,
                             const std::string& tensorName);
+
+  void* get_device_storage() const {
+    auto* manual_loader = dynamic_cast<BaseManualLoader*>(loader_.get());
+    return manual_loader ? manual_loader->get_device_storage() : nullptr;
+  }
+
+  uint64_t get_storage_size() const {
+    auto* manual_loader = dynamic_cast<BaseManualLoader*>(loader_.get());
+    return manual_loader ? manual_loader->get_storage_size() : 0;
+  }
+
+  void append_weight_addrs(std::vector<void*>& weight_addrs,
+                           std::vector<size_t>& weight_sizes) {
+    if (!loader_) {
+      return;
+    }
+    auto* manual_loader = dynamic_cast<BaseManualLoader*>(loader_.get());
+    if (manual_loader) {
+      void* storage = manual_loader->get_device_storage();
+      uint64_t storage_size = manual_loader->get_storage_size();
+      if (storage != nullptr && storage_size > 0) {
+        weight_addrs.push_back(storage);
+        weight_sizes.push_back(static_cast<size_t>(storage_size));
+        return;
+      }
+    }
+    auto& tensors = loader_->get_at_weight_tensors();
+    for (auto& tensor : tensors) {
+      if (!tensor.defined() || tensor.numel() < 1) {
+        continue;
+      }
+      weight_addrs.push_back(tensor.data_ptr());
+      weight_sizes.push_back(static_cast<size_t>(tensor.nbytes()));
+    }
+  }
 
  protected:
   atb::Tensor XTensor2Tensor(const std::shared_ptr<xllm::XTensor>& xtensor);

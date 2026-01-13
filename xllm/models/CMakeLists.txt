@@ -1,5 +1,10 @@
 include(cc_library)
 
+set(MODELS_DEPS :model)
+if(USE_NPU)
+  list(APPEND MODELS_DEPS mf_smem)
+endif()
+
 # Define the library
 cc_library(
   NAME
@@ -10,5 +15,5 @@ cc_library(
   SRCS
     model_registry.cpp
   DEPS
-    :model
+    ${MODELS_DEPS}
 )

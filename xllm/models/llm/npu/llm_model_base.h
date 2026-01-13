@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <acl/acl.h>
 #include <atb/atb_infer.h>
 #include <gflags/gflags.h>
 #include <torch/torch.h>
@@ -34,6 +35,7 @@ limitations under the License.
 #include "core/layers/npu/npu_pos_embedding_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/npu_word_embedding_impl.h"
+#include "mf_weight_transfer.h"
 #include "models/model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
@@ -83,6 +85,19 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
   virtual void merge_loaded_weights() {
     decoder_layer_->merge_loaded_weights();
     block_copy_->merge_loaded_weights();
+  }
+
+  void* get_device_storage() const {
+    return decoder_layer_->get_device_storage();
+  }
+
+  uint64_t get_storage_size() const {
+    return decoder_layer_->get_storage_size();
+  }
+
+  void append_weight_addrs(std::vector<void*>& weight_addrs,
+                           std::vector<size_t>& weight_sizes) {
+    decoder_layer_->append_weight_addrs(weight_addrs, weight_sizes);
   }
 
   // load the weight from the checkpoint
@@ -257,6 +272,29 @@ class LlmModelImplBase : public torch::nn::Module {
     norm_->merge_loaded_weights();
   }
 
+  void collect_weight_addrs_and_sizes(std::vector<void*>& weight_addrs,
+                                      std::vector<size_t>& weight_sizes) {
+    npu_embed_tokens_->append_weight_addrs(weight_addrs, weight_sizes);
+    for (size_t i = 0; i < layers_.size(); ++i) {
+      layers_[i]->append_weight_addrs(weight_addrs, weight_sizes);
+    }
+    norm_->append_weight_addrs(weight_addrs, weight_sizes);
+  }
+
+  std::vector<void*> get_weight_addrs() {
+    std::vector<void*> weight_addrs;
+    std::vector<size_t> weight_sizes;
+    collect_weight_addrs_and_sizes(weight_addrs, weight_sizes);
+    return weight_addrs;
+  }
+
+  std::vector<size_t> get_weight_sizes() {
+    std::vector<void*> weight_addrs;
+    std::vector<size_t> weight_sizes;
+    collect_weight_addrs_and_sizes(weight_addrs, weight_sizes);
+    return weight_sizes;
+  }
+
   virtual layer::NpuWordEmbedding get_npu_word_embedding() {
     return npu_embed_tokens_;
   }
@@ -348,6 +386,8 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     model_->merge_loaded_weights();
     // test
     npu_lm_head_->merge_loaded_weights();
+
+    init_mf_weight_transfer();
   }
 
   virtual void prepare_expert_weight(int32_t layer_id,
@@ -376,6 +416,32 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   bool tie_word_embeddings{false};
   // test
   layer::NpuLmHead npu_lm_head_{nullptr};
+  std::unique_ptr<layer::MfWeightTransfer> mf_weight_transfer_;
+
+ private:
+  void init_mf_weight_transfer() {
+    constexpr const char* kMfIpPort = "tcp://127.0.0.1:12050";
+    constexpr const char* kMfSessionIdSender = "127.0.0.1:10000";
+    constexpr const char* kMfSessionIdReceiver = "127.0.0.1:10001";
+    const bool is_fake_load = FLAGS_FAKE_LOAD;
+    const int rank_id = is_fake_load ? 1 : 0;
+    const int rank_size = 2;
+    const std::string session_id =
+        is_fake_load ? kMfSessionIdReceiver : kMfSessionIdSender;
+    const smem_trans_role_t role =
+        is_fake_load ? SMEM_TRANS_RECEIVER : SMEM_TRANS_SENDER;
+
+    int32_t device_id = 0;
+    aclrtGetDevice(&device_id);
+
+    mf_weight_transfer_ = std::make_unique<layer::MfWeightTransfer>(
+        device_id, rank_id, rank_size, kMfIpPort, session_id, role);
+    std::vector<void*> weight_addrs;
+    std::vector<size_t> weight_sizes;
+    model_->collect_weight_addrs_and_sizes(weight_addrs, weight_sizes);
+    npu_lm_head_->append_weight_addrs(weight_addrs, weight_sizes);
+    mf_weight_transfer_->init(weight_addrs, weight_sizes);
+  }
 };
 
 }  // namespace xllm

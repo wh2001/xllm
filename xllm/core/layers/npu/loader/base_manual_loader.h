@@ -36,6 +36,10 @@ class BaseManualLoader : public BaseLoader {
 
   virtual void init_weight_slices();
 
+  void* get_device_storage() const { return device_storage_; }
+
+  uint64_t get_storage_size() const { return storage_size_; }
+
  protected:
   struct WeightSlice {
     uint64_t offset = 0;

@@ -225,6 +225,16 @@ def set_npu_envs():
     PATH = ATB_HOME_PATH+"/bin" + ":" + PATH
     os.environ["PATH"] = PATH
 
+    # memfabric_hybrid
+    MEMFABRIC_HYBRID_HOME_PATH = "/usr/local/memfabric_hybrid/latest"
+    os.environ["MEMFABRIC_HYBRID_HOME_PATH"] = MEMFABRIC_HYBRID_HOME_PATH
+    LD_LIBRARY_PATH = os.getenv("LD_LIBRARY_PATH", "")
+    LD_LIBRARY_PATH = MEMFABRIC_HYBRID_HOME_PATH + "/aarch64-linux" + "/lib64" + ":" + LD_LIBRARY_PATH
+    os.environ["LD_LIBRARY_PATH"] = LD_LIBRARY_PATH
+    PATH = os.getenv("PATH", "")
+    PATH = MEMFABRIC_HYBRID_HOME_PATH + "/aarch64-linux" + "/bin" + ":" + PATH
+    os.environ["PATH"] = PATH
+
     os.environ["ATB_STREAM_SYNC_EVERY_KERNEL_ENABLE"] = "0"
     os.environ["ATB_STREAM_SYNC_EVERY_RUNNER_ENABLE"] = "0"
     os.environ["ATB_STREAM_SYNC_EVERY_OPERATION_ENABLE"] = "0"

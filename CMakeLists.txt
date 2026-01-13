@@ -330,6 +330,22 @@ if(USE_NPU)
       $ENV{ATB_HOME_PATH}/include
       $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include/
   )
+  # memfabric_hybrid
+  set(MF_PATH $ENV{MEMFABRIC_HYBRID_HOME_PATH})
+  if("${MF_PATH}" STREQUAL "")
+      message(FATAL_ERROR "memfabric_hybrid path not found!")
+  endif()
+
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+      set(TARGET_ARCH "x86_64")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+      set(TARGET_ARCH "aarch64")
+  else()
+      message(FATAL_ERROR "arch is not support!")
+  endif()
+
+  include_directories(${MF_PATH}/include/smem/host)
+
   # xllm_kernels - mark as system headers to suppress warnings from third-party code
   include_directories(SYSTEM
       $ENV{XLLM_KERNELS_PATH}/include/xllm_kernels/core/include
@@ -346,6 +362,8 @@ if(USE_NPU)
       $ENV{NPU_TOOLKIT_HOME}/lib64
       $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/lib/
       $ENV{XLLM_KERNELS_PATH}/lib/
+      ${MF_PATH}/${TARGET_ARCH}-linux/lib
+      ${MF_PATH}/${TARGET_ARCH}-linux/lib64
   )
   link_libraries(cust_opapi)
 endif()
