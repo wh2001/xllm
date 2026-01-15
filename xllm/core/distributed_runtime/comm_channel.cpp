@@ -211,6 +211,42 @@ bool CommChannel::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
+bool CommChannel::transfer_weights(const std::string& direction,
+                                   bool enable_bw_test,
+                                   uint64_t* total_bytes,
+                                   double* time_ms,
+                                   double* bandwidth_gbps,
+                                   std::string* error) {
+  proto::TransferWeightsRequest request;
+  request.set_direction(direction);
+  request.set_enable_bw_test(enable_bw_test);
+
+  proto::TransferWeightsResponse response;
+  brpc::Controller cntl;
+  stub_->TransferWeights(&cntl, &request, &response, nullptr);
+
+  if (total_bytes) {
+    *total_bytes = response.total_bytes();
+  }
+  if (time_ms) {
+    *time_ms = response.time_ms();
+  }
+  if (bandwidth_gbps) {
+    *bandwidth_gbps = response.bandwidth_gbps();
+  }
+
+  if (cntl.Failed() || !response.ok()) {
+    std::string err = cntl.Failed() ? cntl.ErrorText() : response.error();
+    if (error) {
+      *error = err;
+    }
+    LOG(ERROR) << "TransferWeights failed: " << err;
+    return false;
+  }
+
+  return true;
+}
+
 bool CommChannel::init_model(const std::string& model_weights_path,
                              int32_t random_seed) {
   proto::InitModelRequest request;

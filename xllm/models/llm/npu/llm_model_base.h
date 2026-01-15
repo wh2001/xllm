@@ -390,6 +390,22 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     init_mf_weight_transfer();
   }
 
+  bool transfer_weights(const std::string& direction,
+                        bool enable_bw_test,
+                        uint64_t* total_bytes,
+                        double* time_ms,
+                        double* bandwidth_gbps,
+                        std::string* error) {
+    if (!mf_weight_transfer_) {
+      if (error) {
+        *error = "mf_weight_transfer is not initialized";
+      }
+      return false;
+    }
+    return mf_weight_transfer_->transfer_weight(
+        direction, enable_bw_test, total_bytes, time_ms, bandwidth_gbps, error);
+  }
+
   virtual void prepare_expert_weight(int32_t layer_id,
                                      const std::vector<int32_t>& expert_ids) {
     return;
@@ -428,14 +444,22 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     const int rank_size = 2;
     const std::string session_id =
         is_fake_load ? kMfSessionIdReceiver : kMfSessionIdSender;
+    const std::string peer_session_id =
+        is_fake_load ? kMfSessionIdSender : kMfSessionIdReceiver;
     const smem_trans_role_t role =
         is_fake_load ? SMEM_TRANS_RECEIVER : SMEM_TRANS_SENDER;
 
     int32_t device_id = 0;
     aclrtGetDevice(&device_id);
 
-    mf_weight_transfer_ = std::make_unique<layer::MfWeightTransfer>(
-        device_id, rank_id, rank_size, kMfIpPort, session_id, role);
+    mf_weight_transfer_ =
+        std::make_unique<layer::MfWeightTransfer>(device_id,
+                                                  rank_id,
+                                                  rank_size,
+                                                  kMfIpPort,
+                                                  session_id,
+                                                  peer_session_id,
+                                                  role);
     std::vector<void*> weight_addrs;
     std::vector<size_t> weight_sizes;
     model_->collect_weight_addrs_and_sizes(weight_addrs, weight_sizes);

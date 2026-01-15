@@ -205,4 +205,14 @@ folly::SemiFuture<int64_t> Worker::get_active_activation_memory_async() {
   return future;
 }
 
+bool Worker::transfer_weights(const std::string& direction,
+                              bool enable_bw_test,
+                              uint64_t* total_bytes,
+                              double* time_ms,
+                              double* bandwidth_gbps,
+                              std::string* error) {
+  return impl_->transfer_weights(
+      direction, enable_bw_test, total_bytes, time_ms, bandwidth_gbps, error);
+}
+
 }  // namespace xllm

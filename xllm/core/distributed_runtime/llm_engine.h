@@ -95,6 +95,13 @@ class LLMEngine : public Engine {
                       std::vector<int64_t>& k_cache_ids,
                       std::vector<int64_t>& v_cache_ids) override;
 
+  bool transfer_weights(const std::string& direction,
+                        bool enable_bw_test,
+                        uint64_t* total_bytes,
+                        double* time_ms,
+                        double* bandwidth_gbps,
+                        std::string* error);
+
   bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                     const std::vector<std::string>& addrs,
                     const std::vector<std::string>& device_ips,

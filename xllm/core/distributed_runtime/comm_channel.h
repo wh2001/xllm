@@ -62,6 +62,13 @@ class CommChannel {
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports);
 
+  virtual bool transfer_weights(const std::string& direction,
+                                bool enable_bw_test,
+                                uint64_t* total_bytes,
+                                double* time_ms,
+                                double* bandwidth_gbps,
+                                std::string* error);
+
   virtual bool init_model(const std::string& model_weights_path,
                           int32_t random_seed);
 

@@ -24,10 +24,27 @@ limitations under the License.
 #include "layers/lm_head.h"
 #include "layers/word_embedding.h"
 #endif
+
+namespace detail {
+template <typename T, typename = void>
+struct has_transfer_weights : std::false_type {};
+
+template <typename T>
+struct has_transfer_weights<
+    T,
+    std::void_t<decltype(std::declval<T>()->transfer_weights(
+        std::declval<const std::string&>(),
+        std::declval<bool>(),
+        std::declval<uint64_t*>(),
+        std::declval<double*>(),
+        std::declval<double*>(),
+        std::declval<std::string*>()))>> : std::true_type {};
+}  // namespace detail
 // clang-format on
 #include <c10/core/Device.h>
 #include <torch/torch.h>
 
+#include <string>
 #include <vector>
 
 #include "core/framework/kv_cache/kv_cache.h"
@@ -131,6 +148,18 @@ class CausalLM : public torch::nn::Module {
                   "this model.";
   }
 #endif
+
+  virtual bool transfer_weights(const std::string& direction,
+                                bool enable_bw_test,
+                                uint64_t* total_bytes,
+                                double* time_ms,
+                                double* bandwidth_gbps,
+                                std::string* error) {
+    if (error) {
+      *error = "transfer_weights is not supported";
+    }
+    return false;
+  }
 };
 
 template <typename Model>
@@ -213,6 +242,24 @@ class CausalLMImpl : public CausalLM {
     }
   }
 #endif
+
+  bool transfer_weights(const std::string& direction,
+                        bool enable_bw_test,
+                        uint64_t* total_bytes,
+                        double* time_ms,
+                        double* bandwidth_gbps,
+                        std::string* error) override {
+    if constexpr (detail::has_transfer_weights<Model>::value) {
+      return model_->transfer_weights(direction,
+                                      enable_bw_test,
+                                      total_bytes,
+                                      time_ms,
+                                      bandwidth_gbps,
+                                      error);
+    }
+    return CausalLM::transfer_weights(
+        direction, enable_bw_test, total_bytes, time_ms, bandwidth_gbps, error);
+  }
 
   torch::Device device() const override { return options_.device(); }
 

@@ -90,6 +90,13 @@ class LLMMaster : public Master {
                       const std::vector<uint16_t>& ports,
                       const int32_t dp_size);
 
+  bool transfer_weights(const std::string& direction,
+                        bool enable_bw_test,
+                        uint64_t* total_bytes,
+                        double* time_ms,
+                        double* bandwidth_gbps,
+                        std::string* error) override;
+
  private:
   std::shared_ptr<Request> generate_request(
       std::string prompt,

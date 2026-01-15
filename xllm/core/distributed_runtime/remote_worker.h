@@ -81,6 +81,13 @@ class RemoteWorker : public WorkerClient {
                               const std::vector<uint64_t>& src_blocks,
                               const std::vector<uint64_t>& dst_blocks);
 
+  bool transfer_weights(const std::string& direction,
+                        bool enable_bw_test,
+                        uint64_t* total_bytes,
+                        double* time_ms,
+                        double* bandwidth_gbps,
+                        std::string* error) override;
+
   // prepare input request
   virtual ForwardInput prepare_inputs(Batch& batch) override;
 

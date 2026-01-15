@@ -695,6 +695,22 @@ int64_t WorkerImpl::get_active_activation_memory() {
       .active_activation_memory;
 }
 
+bool WorkerImpl::transfer_weights(const std::string& direction,
+                                  bool enable_bw_test,
+                                  uint64_t* total_bytes,
+                                  double* time_ms,
+                                  double* bandwidth_gbps,
+                                  std::string* error) {
+  if (!model_) {
+    if (error) {
+      *error = "model is not initialized";
+    }
+    return false;
+  }
+  return model_->transfer_weights(
+      direction, enable_bw_test, total_bytes, time_ms, bandwidth_gbps, error);
+}
+
 void WorkerImpl::init_hierarchy_kv_cache_transfer() {
   if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
     HierarchyKVCacheTransfer::Options transfer_options;

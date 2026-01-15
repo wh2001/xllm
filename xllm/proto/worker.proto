@@ -59,6 +59,19 @@ message PullKVCacheRequest {
   repeated uint64 dst_blocks = 5;
 }
 
+message TransferWeightsRequest {
+  string direction = 1;
+  bool enable_bw_test = 2;
+}
+
+message TransferWeightsResponse {
+  bool ok = 1;
+  uint64 total_bytes = 2;
+  double time_ms = 3;
+  double bandwidth_gbps = 4;
+  string error = 5;
+}
+
 enum TransferType {
   G2H = 0;
   H2D = 1;
@@ -271,6 +284,7 @@ service DistributeWorker {
   rpc AllocateContinuousKVCache (XTensorOptionsVec) returns (Status);
   rpc AllocateKVCacheWithTransfer(AllocateKVCacheWithTransferRequest) returns (Status) {}
   rpc PullKVCache(PullKVCacheRequest) returns (Status) {}
+  rpc TransferWeights(TransferWeightsRequest) returns (TransferWeightsResponse) {}
   rpc GetDeviceInfo(Empty) returns (DeviceInfo) {}
   rpc GetCacheInfo(Empty) returns (CacheInfo) {}
   rpc LinkCluster(ClusterInfo) returns (Status) {}

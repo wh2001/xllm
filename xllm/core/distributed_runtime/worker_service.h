@@ -80,6 +80,11 @@ class WorkerService : public proto::DistributeWorker {
                    proto::Status* resp,
                    ::google::protobuf::Closure* done) override;
 
+  void TransferWeights(::google::protobuf::RpcController* controller,
+                       const proto::TransferWeightsRequest* req,
+                       proto::TransferWeightsResponse* resp,
+                       ::google::protobuf::Closure* done) override;
+
   void TransferBlocks(::google::protobuf::RpcController* controller,
                       const proto::BlockTransferInfos* req,
                       proto::TransferStatus* resp,

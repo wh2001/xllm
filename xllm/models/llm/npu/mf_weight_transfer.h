@@ -36,12 +36,15 @@ class MfWeightTransfer {
                    int rank_size,
                    const std::string& ip_port,
                    const std::string& session_id,
+                   const std::string& peer_session_id,
                    smem_trans_role_t role)
       : device_id_(device_id),
         rank_id_(rank_id),
         rank_size_(rank_size),
         ip_port_(ip_port),
-        session_id_(session_id) {
+        session_id_(session_id),
+        peer_session_id_(peer_session_id),
+        role_(role) {
     const uint32_t LOG_LEVEL_WARNING = 2;
     smem_set_log_level(LOG_LEVEL_WARNING);
     auto ret = smem_init(0);
@@ -171,6 +174,111 @@ class MfWeightTransfer {
     LOG(ERROR) << "transfer_weight is not implemented yet.";
   }
 
+  bool transfer_weight(const std::string& direction,
+                       bool enable_bw_test,
+                       uint64_t* total_bytes,
+                       double* time_ms,
+                       double* bandwidth_gbps,
+                       std::string* error) {
+    if (rank_size_ < 2) {
+      if (error) {
+        *error = "rank_size must be >= 2 for weight transfer";
+      }
+      return false;
+    }
+    if (direction != "push" && direction != "pull") {
+      if (error) {
+        *error = "invalid direction, must be push or pull";
+      }
+      return false;
+    }
+    const bool is_push = (direction == "push");
+    if (is_push && role_ != SMEM_TRANS_SENDER) {
+      if (error) {
+        *error = "direction push requires sender role";
+      }
+      return false;
+    }
+    if (!is_push && role_ != SMEM_TRANS_RECEIVER) {
+      if (error) {
+        *error = "direction pull requires receiver role";
+      }
+      return false;
+    }
+    if (weight_addrs_.empty()) {
+      if (error) {
+        *error = "no registered weight addresses";
+      }
+      return false;
+    }
+
+    const int peer_rank = (rank_id_ == 0) ? 1 : 0;
+    auto& remote_weight_addrs = global_weight_addrs_[peer_rank];
+    const uint32_t count = static_cast<uint32_t>(weight_sizes_.size());
+    if (remote_weight_addrs.size() != weight_addrs_.size() ||
+        weight_sizes_.size() != weight_addrs_.size()) {
+      if (error) {
+        *error = "weight address/size count mismatch";
+      }
+      return false;
+    }
+
+    uint64_t bytes_sum = 0;
+    for (const auto size : weight_sizes_) {
+      bytes_sum += static_cast<uint64_t>(size);
+    }
+    if (total_bytes) {
+      *total_bytes = bytes_sum;
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    int ret = 0;
+    if (is_push) {
+      ret =
+          smem_trans_batch_write(trans_handle_,
+                                 const_cast<const void**>(weight_addrs_.data()),
+                                 peer_session_id_.c_str(),
+                                 remote_weight_addrs.data(),
+                                 weight_sizes_.data(),
+                                 count);
+    } else {
+      ret = smem_trans_batch_read(
+          trans_handle_,
+          weight_addrs_.data(),
+          peer_session_id_.c_str(),
+          const_cast<const void**>(remote_weight_addrs.data()),
+          weight_sizes_.data(),
+          count);
+    }
+    if (ret != 0) {
+      if (error) {
+        *error = "smem transfer failed, ret=" + std::to_string(ret);
+      }
+      return false;
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration_ms =
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+            end - start)
+            .count();
+    if (time_ms) {
+      *time_ms = duration_ms;
+    }
+    if (bandwidth_gbps) {
+      if (duration_ms > 0.0) {
+        const double seconds = duration_ms / 1000.0;
+        *bandwidth_gbps = (static_cast<double>(bytes_sum) / seconds) / 1e9;
+      } else {
+        *bandwidth_gbps = 0.0;
+      }
+    }
+    if (enable_bw_test) {
+      LOG(INFO) << "mf_weight_transfer bandwidth test, bytes:" << bytes_sum
+                << ", time_ms:" << duration_ms;
+    }
+    return true;
+  }
+
  private:
   int device_id_;
   int rank_id_;
@@ -179,6 +287,8 @@ class MfWeightTransfer {
   smem_trans_config_t trans_config_;
   smem_trans_t trans_handle_;
   std::string session_id_;
+  std::string peer_session_id_;
+  smem_trans_role_t role_;
 
   smem_shm_config_t shm_config_;
   smem_shm_t shm_handle_;

@@ -476,6 +476,23 @@ bool LLMMaster::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
       cluster_ids, addrs, device_ips, ports, dp_size);
 }
 
+bool LLMMaster::transfer_weights(const std::string& direction,
+                                 bool enable_bw_test,
+                                 uint64_t* total_bytes,
+                                 double* time_ms,
+                                 double* bandwidth_gbps,
+                                 std::string* error) {
+  auto* llm_engine = dynamic_cast<LLMEngine*>(engine_.get());
+  if (!llm_engine) {
+    if (error) {
+      *error = "invalid engine type for weight transfer";
+    }
+    return false;
+  }
+  return llm_engine->transfer_weights(
+      direction, enable_bw_test, total_bytes, time_ms, bandwidth_gbps, error);
+}
+
 LLMAssistantMaster::LLMAssistantMaster(const Options& options)
     : Master(options,
              options.draft_model_path().value_or("").empty()

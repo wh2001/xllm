@@ -57,6 +57,18 @@ class Master {
     return false;
   }
 
+  virtual bool transfer_weights(const std::string& direction,
+                                bool enable_bw_test,
+                                uint64_t* total_bytes,
+                                double* time_ms,
+                                double* bandwidth_gbps,
+                                std::string* error) {
+    if (error) {
+      *error = "transfer_weights is not supported";
+    }
+    return false;
+  }
+
   RateLimiter* get_rate_limiter() { return &rate_limiter_; }
 
  protected:

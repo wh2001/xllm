@@ -573,6 +573,22 @@ void LLMEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
   }
 }
 
+bool LLMEngine::transfer_weights(const std::string& direction,
+                                 bool enable_bw_test,
+                                 uint64_t* total_bytes,
+                                 double* time_ms,
+                                 double* bandwidth_gbps,
+                                 std::string* error) {
+  if (worker_clients_.empty()) {
+    if (error) {
+      *error = "no worker clients available";
+    }
+    return false;
+  }
+  return worker_clients_.front()->transfer_weights(
+      direction, enable_bw_test, total_bytes, time_ms, bandwidth_gbps, error);
+}
+
 bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                              const std::vector<std::string>& addrs,
                              const std::vector<std::string>& device_ips,

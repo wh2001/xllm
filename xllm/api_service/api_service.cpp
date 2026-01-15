@@ -590,6 +590,73 @@ void APIService::UnlinkCluster(::google::protobuf::RpcController* controller,
   }
 }
 
+void APIService::WeightTransferHttp(
+    ::google::protobuf::RpcController* controller,
+    const proto::HttpRequest* request,
+    proto::HttpResponse* response,
+    ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto arena = response->GetArena();
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::WeightTransferRequest>(
+          arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<proto::WeightTransferResponse>(
+          arena);
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  std::string error;
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << error;
+    return;
+  }
+
+  if (req_pb->direction().empty()) {
+    ctrl->SetFailed("direction is required");
+    return;
+  }
+
+  uint64_t total_bytes = 0;
+  double time_ms = 0.0;
+  double bandwidth_gbps = 0.0;
+  std::string transfer_error;
+  bool status = master_->transfer_weights(req_pb->direction(),
+                                          req_pb->enable_bw_test(),
+                                          &total_bytes,
+                                          &time_ms,
+                                          &bandwidth_gbps,
+                                          &transfer_error);
+  if (!status) {
+    if (transfer_error.empty()) {
+      transfer_error = "weight transfer failed";
+    }
+    ctrl->SetFailed(transfer_error);
+    return;
+  }
+
+  resp_pb->set_status(true);
+  resp_pb->set_total_bytes(total_bytes);
+  resp_pb->set_time_ms(time_ms);
+  resp_pb->set_bandwidth_gbps(bandwidth_gbps);
+
+  std::string err_msg;
+  butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
+  if (!json2pb::ProtoMessageToJson(*resp_pb, &json_output, &err_msg)) {
+    LOG(ERROR) << "proto to json failed";
+    return;
+  }
+}
+
 void APIService::ModelVersionsHttp(
     ::google::protobuf::RpcController* controller,
     const proto::HttpRequest* request,

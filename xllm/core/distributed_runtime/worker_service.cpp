@@ -393,6 +393,34 @@ void WorkerService::PullKVCache(::google::protobuf::RpcController* controller,
   return;
 }
 
+void WorkerService::TransferWeights(
+    ::google::protobuf::RpcController* controller,
+    const proto::TransferWeightsRequest* req,
+    proto::TransferWeightsResponse* resp,
+    ::google::protobuf::Closure* done) {
+  threadpool_->schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    uint64_t total_bytes = 0;
+    double time_ms = 0.0;
+    double bandwidth_gbps = 0.0;
+    std::string error;
+    bool status = worker_->transfer_weights(req->direction(),
+                                            req->enable_bw_test(),
+                                            &total_bytes,
+                                            &time_ms,
+                                            &bandwidth_gbps,
+                                            &error);
+    resp->set_ok(status);
+    resp->set_total_bytes(total_bytes);
+    resp->set_time_ms(time_ms);
+    resp->set_bandwidth_gbps(bandwidth_gbps);
+    if (!error.empty()) {
+      resp->set_error(error);
+    }
+  });
+  return;
+}
+
 void WorkerService::TransferBlocks(
     ::google::protobuf::RpcController* controller,
     const proto::BlockTransferInfos* req,

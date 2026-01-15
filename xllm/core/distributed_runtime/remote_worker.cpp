@@ -135,6 +135,16 @@ bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
                                   dst_blocks);
 }
 
+bool RemoteWorker::transfer_weights(const std::string& direction,
+                                    bool enable_bw_test,
+                                    uint64_t* total_bytes,
+                                    double* time_ms,
+                                    double* bandwidth_gbps,
+                                    std::string* error) {
+  return channel_->transfer_weights(
+      direction, enable_bw_test, total_bytes, time_ms, bandwidth_gbps, error);
+}
+
 ForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
   LOG(FATAL) << "RemoteWorker Method prepare_inputs is UnImplemented.";
   return {};

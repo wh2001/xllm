@@ -180,6 +180,13 @@ class WorkerImpl {
 
   Status get_status() const { return status_; }
 
+  virtual bool transfer_weights(const std::string& direction,
+                                bool enable_bw_test,
+                                uint64_t* total_bytes,
+                                double* time_ms,
+                                double* bandwidth_gbps,
+                                std::string* error);
+
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
 
