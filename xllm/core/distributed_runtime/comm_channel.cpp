@@ -122,6 +122,21 @@ bool CommChannel::get_device_info(std::string& device_ip, uint16_t& port) {
   return true;
 }
 
+bool CommChannel::get_p2p_addr(std::string& p2p_addr) {
+  proto::Empty req;
+  proto::P2PAddr resp;
+  brpc::Controller cntl;
+
+  stub_->GetP2PAddr(&cntl, &req, &resp, nullptr);
+  if (cntl.Failed()) {
+    LOG(ERROR) << "GetP2PAddr failed: " << cntl.ErrorText();
+    return false;
+  }
+
+  p2p_addr = resp.addr();
+  return true;
+}
+
 bool CommChannel::get_cache_info(uint64_t& cluster_id,
                                  std::string& addr,
                                  int64_t& k_cache_id,

@@ -56,6 +56,8 @@ class Master {
     return false;
   }
 
+  virtual bool resize(uint64_t new_kv_cache_pages) { return false; }
+
   int32_t get_master_status() const { return master_status_; }
 
   void set_master_status(int32_t master_status) {

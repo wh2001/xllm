@@ -47,6 +47,10 @@ void WorkerClient::get_device_info(std::string& device_ip, uint16_t& port) {
   worker_->get_device_info(device_ip, port);
 }
 
+void WorkerClient::get_p2p_addr(std::string& p2p_addr) {
+  worker_->get_p2p_addr(p2p_addr);
+}
+
 void WorkerClient::get_cache_info(uint64_t& cluster_id,
                                   std::string& addr,
                                   int64_t& k_cache_id,

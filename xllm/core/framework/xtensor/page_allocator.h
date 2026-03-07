@@ -141,6 +141,13 @@ class PageAllocator {
   // Trim reserved KV cache pages (unmap physical pages)
   void trim_kv_cache(const std::string& model_id, int32_t dp_rank);
 
+  // Resize KV cache: change the total number of virtual pages for a model.
+  // If expanding: allocates more virtual pages (requires available physical pages).
+  // If shrinking: trims free pages first, then reduces total count.
+  // Returns true on success.
+  bool resize_kv_cache(const std::string& model_id,
+                       size_t new_total_virt_pages);
+
   // ============ Weight Page Allocation ============
   // Allocate physical pages for weight tensor (full map)
   // model_id: which model this allocation is for
@@ -213,6 +220,7 @@ class PageAllocator {
     size_t num_total_virt_pages = 0;
     size_t phy_pages_per_virt_page = 0;
     size_t weight_pages_allocated = 0;  // Not cleared on free, used for wakeup
+    bool weight_on_device = false;      // True only when pages physically allocated
     bool is_sleeping = false;
     // Count of pending map operations (for safe sleep)
     std::atomic<int> pending_map_ops{0};

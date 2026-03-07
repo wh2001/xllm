@@ -88,6 +88,10 @@ void Worker::get_device_info(std::string& device_ip, uint16_t& port) {
   impl_->get_device_info(device_ip, port);
 }
 
+void Worker::get_p2p_addr(std::string& p2p_addr) {
+  impl_->get_p2p_addr(p2p_addr);
+}
+
 void Worker::get_cache_info(uint64_t& cluster_id,
                             std::string& addr,
                             int64_t& k_cache_id,

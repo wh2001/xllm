@@ -82,6 +82,8 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   instance_info_.name = options_.instance_name().value_or("");
   instance_info_.type = options_.instance_role().value().to_string();
   instance_info_.dp_size = options.dp_size();
+  engine_->get_device_info(instance_info_.device_ips, instance_info_.ports);
+  engine_->get_p2p_addrs(instance_info_.p2p_addrs);
 
   if (options_.enable_schedule_overlap()) {
     min_speculative_tokens_required_ = options_.num_speculative_tokens() * 2;

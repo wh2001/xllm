@@ -90,6 +90,11 @@ class WorkerService : public proto::DistributeWorker {
                      proto::DeviceInfo* resp,
                      ::google::protobuf::Closure* done) override;
 
+  void GetP2PAddr(::google::protobuf::RpcController* controller,
+                  const proto::Empty* req,
+                  proto::P2PAddr* resp,
+                  ::google::protobuf::Closure* done) override;
+
   void GetCacheInfo(::google::protobuf::RpcController* controller,
                     const proto::Empty* req,
                     proto::CacheInfo* resp,

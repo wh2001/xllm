@@ -301,6 +301,15 @@ void WorkerImpl::get_device_info(std::string& device_ip, uint16_t& port) {
   port = options_.transfer_listen_port();
 }
 
+void WorkerImpl::get_p2p_addr(std::string& p2p_addr) {
+#if defined(USE_NPU)
+  auto& core = MooncakeTransferEngineCore::get_instance();
+  if (core.is_initialized()) {
+    p2p_addr = core.addr();
+  }
+#endif
+}
+
 void WorkerImpl::get_cache_info(uint64_t& cluster_id,
                                 std::string& addr,
                                 int64_t& k_cache_id,

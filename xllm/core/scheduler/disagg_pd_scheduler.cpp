@@ -126,6 +126,7 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
   instance_info_.dp_size = options_.dp_size();
 
   engine->get_device_info(instance_info_.device_ips, instance_info_.ports);
+  engine->get_p2p_addrs(instance_info_.p2p_addrs);
 
   // Get total physical pages per worker (for etcd registration)
 #if defined(USE_NPU)

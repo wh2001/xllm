@@ -669,6 +669,18 @@ void LLMEngine::get_device_info(std::vector<std::string>& device_ips,
   ports = worker_ports_;
 }
 
+void LLMEngine::get_p2p_addrs(std::vector<std::string>& p2p_addrs) {
+#if defined(USE_NPU)
+  p2p_addrs.reserve(worker_clients_num_);
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
+       ++worker_rank) {
+    std::string p2p_addr;
+    worker_clients_[worker_rank]->get_p2p_addr(p2p_addr);
+    p2p_addrs.emplace_back(std::move(p2p_addr));
+  }
+#endif
+}
+
 void LLMEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
                                std::vector<std::string>& addrs,
                                std::vector<int64_t>& k_cache_ids,
@@ -1213,6 +1225,43 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
   }
   LOG(INFO) << "Wakeup finished for LLM engine.";
 
+  return true;
+}
+
+bool LLMEngine::resize(uint64_t new_kv_cache_pages) {
+  if (!FLAGS_enable_xtensor) {
+    LOG(WARNING) << "resize requires FLAGS_enable_xtensor to be enabled";
+    return false;
+  }
+
+  const std::string& model_id = options_.model_id();
+  auto& page_allocator = PageAllocator::get_instance();
+
+  size_t current_pages = page_allocator.get_num_total_virt_pages(model_id);
+  LOG(INFO) << "Resize KV cache for model=" << model_id
+            << " current_pages=" << current_pages
+            << " new_pages=" << new_kv_cache_pages;
+
+  if (new_kv_cache_pages == current_pages) {
+    LOG(INFO) << "Resize no-op, already at target size";
+    return true;
+  }
+
+  if (new_kv_cache_pages < current_pages) {
+    // Shrink: trim reserved pages first, then resize
+    for (uint32_t dp = 0; dp < dp_size_; ++dp) {
+      page_allocator.trim_kv_cache(model_id, dp);
+    }
+  }
+
+  if (!page_allocator.resize_kv_cache(model_id,
+                                       static_cast<size_t>(new_kv_cache_pages))) {
+    LOG(ERROR) << "Failed to resize KV cache for model=" << model_id;
+    return false;
+  }
+
+  LOG(INFO) << "Resize KV cache succeeded for model=" << model_id
+            << " new_pages=" << new_kv_cache_pages;
   return true;
 }
 

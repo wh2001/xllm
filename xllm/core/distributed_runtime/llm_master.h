@@ -83,6 +83,8 @@ class LLMMaster : public Master {
 
   bool unlink_d2d(const std::vector<std::string>& device_ips) override;
 
+  bool resize(uint64_t new_kv_cache_pages) override;
+
  private:
   std::shared_ptr<Request> generate_request(
       std::string prompt,

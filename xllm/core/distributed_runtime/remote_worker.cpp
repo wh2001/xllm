@@ -78,6 +78,10 @@ void RemoteWorker::get_device_info(std::string& device_ip, uint16_t& port) {
   channel_->get_device_info(device_ip, port);
 }
 
+void RemoteWorker::get_p2p_addr(std::string& p2p_addr) {
+  channel_->get_p2p_addr(p2p_addr);
+}
+
 void RemoteWorker::get_cache_info(uint64_t& cluster_id,
                                   std::string& addr,
                                   int64_t& k_cache_id,

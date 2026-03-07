@@ -217,6 +217,8 @@ struct InstanceInfo {
   // device network info
   std::vector<std::string> device_ips;
   std::vector<uint16_t> ports;
+  // P2P addresses for mooncake transfer engine (format: "IP:port")
+  std::vector<std::string> p2p_addrs;
   // ttft profiling data
   std::vector<std::pair<int32_t, double>> ttft_profiling_data;
   // tpot profiling data
@@ -255,6 +257,7 @@ struct InstanceInfo {
     json_val["dp_size"] = dp_size;
     json_val["device_ips"] = device_ips;
     json_val["ports"] = ports;
+    json_val["p2p_addrs"] = p2p_addrs;
     json_val["ttft_profiling_data"] = ttft_profiling_data;
     json_val["tpot_profiling_data"] = tpot_profiling_data;
     // XTensor mode info

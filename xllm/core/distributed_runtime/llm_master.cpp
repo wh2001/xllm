@@ -482,6 +482,10 @@ bool LLMMaster::unlink_d2d(const std::vector<std::string>& device_ips) {
   return engine_->unlink_d2d(device_ips);
 }
 
+bool LLMMaster::resize(uint64_t new_kv_cache_pages) {
+  return engine_->resize(new_kv_cache_pages);
+}
+
 LLMAssistantMaster::LLMAssistantMaster(const Options& options)
     : Master(options,
              options.draft_model_path().value_or("").empty()

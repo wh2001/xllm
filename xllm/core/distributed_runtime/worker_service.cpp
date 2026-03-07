@@ -476,6 +476,19 @@ void WorkerService::GetDeviceInfo(::google::protobuf::RpcController* controller,
   return;
 }
 
+void WorkerService::GetP2PAddr(::google::protobuf::RpcController* controller,
+                               const proto::Empty* req,
+                               proto::P2PAddr* resp,
+                               ::google::protobuf::Closure* done) {
+  threadpool_->schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    std::string p2p_addr;
+    worker_->get_p2p_addr(p2p_addr);
+    resp->set_addr(p2p_addr);
+  });
+  return;
+}
+
 void WorkerService::LinkCluster(::google::protobuf::RpcController* controller,
                                 const proto::ClusterInfo* req,
                                 proto::Status* resp,

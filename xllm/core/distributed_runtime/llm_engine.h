@@ -90,6 +90,8 @@ class LLMEngine : public Engine {
   void get_device_info(std::vector<std::string>& device_ips,
                        std::vector<uint16_t>& ports) override;
 
+  void get_p2p_addrs(std::vector<std::string>& p2p_addrs) override;
+
   void get_cache_info(std::vector<uint64_t>& cluster_ids,
                       std::vector<std::string>& addrs,
                       std::vector<int64_t>& k_cache_ids,
@@ -122,6 +124,8 @@ class LLMEngine : public Engine {
   bool sleep(int32_t master_status) override;
 
   bool wakeup(const WakeupOptions& options) override;
+
+  bool resize(uint64_t new_kv_cache_pages) override;
 
   // XTensor mode: get GlobalXTensor offsets for allocated blocks via RPC
   // Calls worker in the specified DP group to compute offsets

@@ -104,6 +104,10 @@ class Engine {
     NOT_IMPLEMENTED();
   };
 
+  virtual void get_p2p_addrs(std::vector<std::string>& p2p_addrs) {
+    // Default: empty (no P2P support)
+  };
+
   virtual void get_cache_info(std::vector<uint64_t>& cluster_ids,
                               std::vector<std::string>& addrs,
                               std::vector<int64_t>& k_cache_ids,
@@ -158,6 +162,11 @@ class Engine {
 
   virtual bool wakeup(const WakeupOptions& options) {
     LOG(FATAL) << " wakeup is not implemented!";
+    return false;
+  };
+
+  virtual bool resize(uint64_t new_kv_cache_pages) {
+    LOG(WARNING) << "resize is not implemented for this engine";
     return false;
   };
 
