@@ -76,6 +76,11 @@ VLMMaster::VLMMaster(const Options& options)
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
   if (options_.enable_service_routing()) {
+    // Profile TTFT and TPOT before registration
+    if (!options_.disable_ttft_profiling()) {
+      scheduler_->profile_ttft();
+      scheduler_->profile_tpot();
+    }
     auto& instance_info = scheduler_->get_instance_info();
     XServiceClient::get_instance()->register_instance(instance_info);
   }

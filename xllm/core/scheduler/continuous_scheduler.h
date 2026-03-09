@@ -174,6 +174,10 @@ class ContinuousScheduler : public Scheduler {
 
   ProfileManager* get_profile_manager() { return profile_manager_.get(); }
 
+  // Profile TTFT and TPOT for the current model
+  void profile_ttft();
+  void profile_tpot();
+
   virtual void get_latency_metrics(std::vector<int64_t>& ttft,
                                    std::vector<int64_t>& tbt) {}
 

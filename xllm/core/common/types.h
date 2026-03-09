@@ -219,10 +219,12 @@ struct InstanceInfo {
   std::vector<uint16_t> ports;
   // P2P addresses for mooncake transfer engine (format: "IP:port")
   std::vector<std::string> p2p_addrs;
-  // ttft profiling data
-  std::vector<std::pair<int32_t, double>> ttft_profiling_data;
-  // tpot profiling data
-  std::vector<std::tuple<int32_t, int32_t, double>> tpot_profiling_data;
+  // ttft profiling data per model: model_id -> profiling_data
+  std::unordered_map<std::string, std::vector<std::pair<int32_t, double>>>
+      ttft_profiling_data;
+  // tpot profiling data per model: model_id -> profiling_data
+  std::unordered_map<std::string, std::vector<std::tuple<int32_t, int32_t, double>>>
+      tpot_profiling_data;
 
   // XTensor mode: per-worker free physical pages
   std::vector<size_t> worker_free_phy_pages;
@@ -258,8 +260,18 @@ struct InstanceInfo {
     json_val["device_ips"] = device_ips;
     json_val["ports"] = ports;
     json_val["p2p_addrs"] = p2p_addrs;
-    json_val["ttft_profiling_data"] = ttft_profiling_data;
-    json_val["tpot_profiling_data"] = tpot_profiling_data;
+    // Serialize ttft_profiling_data as object with model_id keys
+    nlohmann::json ttft_json;
+    for (const auto& [model_id, data] : ttft_profiling_data) {
+      ttft_json[model_id] = data;
+    }
+    json_val["ttft_profiling_data"] = ttft_json;
+    // Serialize tpot_profiling_data as object with model_id keys
+    nlohmann::json tpot_json;
+    for (const auto& [model_id, data] : tpot_profiling_data) {
+      tpot_json[model_id] = data;
+    }
+    json_val["tpot_profiling_data"] = tpot_json;
     // XTensor mode info
     json_val["worker_free_phy_pages"] = worker_free_phy_pages;
     json_val["total_phy_pages"] = total_phy_pages;

@@ -94,6 +94,63 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
 
 ContinuousScheduler::~ContinuousScheduler() { running_requests_.clear(); }
 
+void ContinuousScheduler::profile_ttft() {
+  LOG(INFO) << "Start profiling TTFT.";
+  auto& model_args = engine_->model_args();
+  int32_t max_context_len = model_args.max_position_embeddings();
+  if (!options_.enable_chunked_prefill()) {
+    max_context_len =
+        std::min(max_context_len, options_.max_tokens_per_batch());
+  }
+
+  // warm up
+  profile_manager_->run_request(max_context_len, 0);
+
+  std::vector<std::pair<int32_t, double>> ttft_data;
+  for (int32_t token_length = max_context_len; token_length > 1;
+       token_length *= 0.9) {
+    double latency = profile_manager_->run_request(token_length, 0);
+    ttft_data.emplace_back(token_length, latency);
+  }
+  instance_info_.ttft_profiling_data[FLAGS_model_id] = std::move(ttft_data);
+}
+
+void ContinuousScheduler::profile_tpot() {
+  LOG(INFO) << "Start profiling TPOT.";
+  auto& model_args = engine_->model_args();
+  int32_t max_context_len = model_args.max_position_embeddings();
+  if (!options_.enable_chunked_prefill()) {
+    max_context_len =
+        std::min(max_context_len, options_.max_tokens_per_batch());
+  }
+
+  int32_t num_blocks = kv_cache_manager_->num_blocks();
+  int32_t block_size = kv_cache_manager_->block_size();
+  int32_t max_seqs_per_batch = options_.max_seqs_per_batch();
+  int32_t request_blocks = max_context_len / block_size + 1;
+  int32_t max_batch_size = num_blocks / request_blocks;
+
+  // warm up
+  profile_manager_->run_request(
+      max_context_len, max_context_len - 1, max_batch_size);
+
+  std::vector<std::tuple<int32_t, int32_t, double>> tpot_data;
+  for (int32_t token_length = max_context_len; token_length > 64;
+       token_length >>= 1) {
+    max_batch_size = num_blocks / (token_length / block_size + 1);
+    int32_t current_max_batch_size = max_batch_size > max_seqs_per_batch
+                                         ? max_seqs_per_batch
+                                         : max_batch_size;
+    for (int32_t batch_size = current_max_batch_size; batch_size > 0;
+         batch_size *= 0.9) {
+      double latency = profile_manager_->profile_decode_step_time(
+          token_length, batch_size, /*min_context_len=*/64, max_context_len);
+      tpot_data.emplace_back(token_length, batch_size, latency);
+    }
+  }
+  instance_info_.tpot_profiling_data[FLAGS_model_id] = std::move(tpot_data);
+}
+
 bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
