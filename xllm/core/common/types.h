@@ -223,7 +223,8 @@ struct InstanceInfo {
   std::unordered_map<std::string, std::vector<std::pair<int32_t, double>>>
       ttft_profiling_data;
   // tpot profiling data per model: model_id -> profiling_data
-  std::unordered_map<std::string, std::vector<std::tuple<int32_t, int32_t, double>>>
+  std::unordered_map<std::string,
+                     std::vector<std::tuple<int32_t, int32_t, double>>>
       tpot_profiling_data;
 
   // XTensor mode: per-worker free physical pages
@@ -235,6 +236,8 @@ struct InstanceInfo {
   // key: model_id, value: list of {offset, size} segments
   std::unordered_map<std::string, std::vector<WeightSegment>>
       model_weight_segments;
+
+  bool enable_disagg_pd = false;
 
   nlohmann::json serialize_to_json() const {
     nlohmann::json json_val;
@@ -285,6 +288,7 @@ struct InstanceInfo {
       segments_json[model_id] = seg_array;
     }
     json_val["model_weight_segments"] = segments_json;
+    json_val["enable_disagg_pd"] = enable_disagg_pd;
     return json_val;
   }
 };

@@ -59,12 +59,18 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
     initialize_rpc_server_and_client(server_name_);
     register_instance_info(server_name_, engine);
 
-    // Profile ttft & topt and update instance info (for mix instances)
-    if (!options_.disable_ttft_profiling() &&
-        options_.instance_role().value() == InstanceRole::MIX) {
-      profile_ttft();
-      profile_tpot();
-    }
+    // Profile ttft & tpot and update instance info (for mix instances).
+    // NOTE: Disabled for MIX instances in MIXPD mode. Profiling is only
+    // consumed by xllm-service's SLO_AWARE/LST_IMH load-balance policies,
+    // which are not used in the current MIXPD setup (default policy is RR).
+    // More critically, profiling allocates a large number of KV blocks at
+    // startup, which exhausts the XTensor physical page pool (shared with
+    // model weights) and causes a fatal "No free physical pages" crash.
+    // if (!options_.disable_ttft_profiling() &&
+    //     options_.instance_role().value() == InstanceRole::MIX) {
+    //   profile_ttft();
+    //   profile_tpot();
+    // }
   }
 }
 

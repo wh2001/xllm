@@ -57,6 +57,8 @@ DECLARE_int32(max_tokens_per_batch);
 
 DECLARE_int32(max_seqs_per_batch);
 
+DECLARE_bool(disable_prefilling_batch);
+
 DECLARE_int32(max_tokens_per_chunk_for_prefill);
 
 // --- speculative inference config ---

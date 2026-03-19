@@ -62,6 +62,9 @@ bool send_delta_to_client_brpc(std::shared_ptr<CompletionCall> call,
                                int64_t created_time,
                                const std::string& model,
                                const RequestOutput& output) {
+  LOG(INFO) << "send_delta_to_client_brpc called, request_id=" << request_id
+            << " finished=" << output.finished
+            << " outputs_size=" << output.outputs.size();
   auto& response = call->response();
 
   for (const auto& seq_output : output.outputs) {

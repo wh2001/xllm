@@ -82,6 +82,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   instance_info_.name = options_.instance_name().value_or("");
   instance_info_.type = options_.instance_role().value().to_string();
   instance_info_.dp_size = options.dp_size();
+  instance_info_.enable_disagg_pd = options_.enable_disagg_pd();
   engine_->get_device_info(instance_info_.device_ips, instance_info_.ports);
   engine_->get_p2p_addrs(instance_info_.p2p_addrs);
 
@@ -245,6 +246,12 @@ void ContinuousScheduler::handle_prefill_requests(
   // they may contian many sequences, so we should check here.
   bool budget_exhausted = false;
   bool blocks_exhausted = false;
+  const bool disable_prefill_batch_in_mix =
+      FLAGS_disable_prefilling_batch && options_.instance_role().has_value() &&
+      options_.instance_role().value() == InstanceRole::MIX;
+  if (disable_prefill_batch_in_mix && !running_sequences_.empty()) {
+    return;
+  }
   while (!waiting_priority_queue.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 && latency_budget > estimate_latency) {
     if (!options_.enable_disagg_pd() &&
@@ -392,6 +399,9 @@ void ContinuousScheduler::handle_prefill_requests(
     running_sequences_budgets_.insert(running_sequences_budgets_.end(),
                                       prefill_sequences_budget.begin(),
                                       prefill_sequences_budget.end());
+    if (disable_prefill_batch_in_mix) {
+      break;
+    }
   }
   // maybe can pre-compute if prompt beyond length
   if (running_sequences_.empty() && !waiting_priority_queue.empty() &&

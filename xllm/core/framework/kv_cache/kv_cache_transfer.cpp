@@ -245,16 +245,41 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
   LOG(INFO) << "Create KVCacheTransfer for " << transfer_type << "flag"
             << FLAGS_kv_cache_transfer_type;
   if (transfer_type == "LlmDataDist") {
-    transfer = std::make_shared<LlmDataDistTransfer>(device_ip,
-                                                     transfer_listen_port,
-                                                     instance_role,
-                                                     model_type,
-                                                     enable_lighting_indexer);
-
-    kv_caches.reserve(num_layers);
-
-    transfer->initialize(device_id);
-    transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
+    if (FLAGS_enable_xtensor) {
+      // In XTensor mode, LlmDataDistTransfer has two problems:
+      // 1. Its Initialize() tries to bind transfer_listen_port, which is
+      // already
+      //    held by MooncakeWeightTransfer (MooncakeTransferEngineService).
+      // 2. Its allocate_kv_cache() uses aclrtMalloc(ACL_MEM_MALLOC_HUGE_ONLY),
+      //    but XTensor pool has already consumed all device huge pages.
+      // Use MooncakeKVCacheTransferXTensor instead: it reuses the singleton
+      // MooncakeTransferEngineCore (no port conflict) and allocates KV cache
+      // from the XTensor pool (no OOM).
+      LOG(INFO)
+          << "XTensor mode: using MooncakeKVCacheTransferXTensor for "
+          << "LlmDataDist KV cache transfer to avoid port conflict and OOM";
+      CHECK(!model_id.empty())
+          << "model_id must be set for LlmDataDist+XTensor mode; "
+             "pass --model_id=<name> or ensure options_.model_id() is "
+             "non-empty";
+      auto xtensor_transfer = std::make_shared<MooncakeKVCacheTransferXTensor>(
+          device_id, transfer_listen_port, device);
+      xtensor_transfer->set_model_id(model_id);
+      xtensor_transfer->initialize(device_id);
+      xtensor_transfer->allocate_kv_cache(
+          kv_caches, num_layers, kv_cache_shape, dtype);
+      xtensor_transfer->register_kv_cache(kv_caches, kv_cache_shape, dtype);
+      transfer = xtensor_transfer;
+    } else {
+      transfer = std::make_shared<LlmDataDistTransfer>(device_ip,
+                                                       transfer_listen_port,
+                                                       instance_role,
+                                                       model_type,
+                                                       enable_lighting_indexer);
+      kv_caches.reserve(num_layers);
+      transfer->initialize(device_id);
+      transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
+    }
   } else if (transfer_type == "Mooncake") {
     std::shared_ptr<MooncakeKVCacheTransferBase> mooncake_transfer;
     if (FLAGS_enable_xtensor) {

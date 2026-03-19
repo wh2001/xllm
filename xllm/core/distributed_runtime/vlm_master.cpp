@@ -66,6 +66,7 @@ VLMMaster::VLMMaster(const Options& options)
       .enable_chunked_prefill(options_.enable_chunked_prefill())
       .instance_name(options_.instance_name())
       .instance_role(options_.instance_role())
+
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
       .enable_service_routing(options_.enable_service_routing())
       .disable_ttft_profiling(options_.disable_ttft_profiling())
@@ -83,6 +84,7 @@ VLMMaster::VLMMaster(const Options& options)
     }
     auto& instance_info = scheduler_->get_instance_info();
     XServiceClient::get_instance()->register_instance(instance_info);
+    scheduler_->post_register_link();
   }
 
   // construct chat template

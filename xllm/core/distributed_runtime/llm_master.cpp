@@ -74,6 +74,7 @@ LLMMaster::LLMMaster(const Options& options)
       .dp_size(options_.dp_size())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_pd_ooc(options_.enable_pd_ooc())
+
       .enable_schedule_overlap(options_.enable_schedule_overlap())
       .enable_chunked_prefill(options_.enable_chunked_prefill())
       .instance_name(options_.instance_name())
@@ -103,6 +104,10 @@ LLMMaster::LLMMaster(const Options& options)
     }
     auto& instance_info = scheduler_->get_instance_info();
     XServiceClient::get_instance()->register_instance(instance_info);
+    // Link to existing peer instances after etcd registration so that
+    // bidirectional links can be established (the remote side can look up
+    // this instance's info) and the mooncake transport is in a stable state.
+    scheduler_->post_register_link();
   }
 
   // construct chat template
@@ -410,6 +415,15 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     stream = false;
   }
 
+  auto batch_callback = [callback](const std::vector<RequestOutput>& outputs) {
+    std::vector<bool> status_set;
+    status_set.reserve(outputs.size());
+    for (const auto& output : outputs) {
+      status_set.push_back(callback(output));
+    }
+    return status_set;
+  };
+
   RequestState req_state(std::move(prompt),
                          std::move(local_prompt_tokens),
                          std::move(sampling_param),
@@ -424,7 +438,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                          sp.skip_special_tokens,
                          options_.enable_schedule_overlap(),
                          callback,
-                         nullptr,
+                         batch_callback,
                          sp.decode_address,
                          call);
 

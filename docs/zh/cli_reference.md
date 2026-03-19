@@ -21,6 +21,7 @@ xLLM使用gflags来管理服务启动参数，具体的参数含义如下：
 | `max_memory_utilization` | `double` | 0.9 | 0-1之间 | 模型权重和KV Cache一起可用的最大device memory占比 |  |
 | `max_tokens_per_batch` | `int32` | int32的最大值 |  | 每个step可计算的最大token数量 |  |
 | `max_seqs_per_batch` | `int32` | 256 |  | 每个step可计算的最大sequence数量 |  |
+| `disable_prefilling_batch` | `bool` | false | true | 仅在`instance_role=MIX`时生效；开启后Prefill请求每个step最多调度1个request（不组batch），Decode仍保持组batch。 |  |
 | `enable_chunked_prefill` | `bool` | true | false | 是否开启chunked prefill |  |
 | `enable_schedule_overlap` | `bool` | false | true | 是否开启异步调度 | [详情](./features/async_schedule.md) |
 | `enable_prefix_cache` | `bool` | true | false | 是否开启prefix cache（DeepSeek暂不支持） |  |

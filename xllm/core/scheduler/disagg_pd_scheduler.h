@@ -104,6 +104,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // check remote instance info, if not exist, get from master service
   bool check_remote_instance_info(const std::string& instance_name);
 
+  void post_register_link() override {}
+
   // create rpc channel to remote instance,
   // we can get remote instance info from master service.
   proto::DisaggPDService_Stub* create_rpc_channel(

@@ -21,6 +21,7 @@ xLLM uses gflags to manage service startup parameters. The specific parameter me
 | `max_memory_utilization` | `double` | 0.9 | Between 0-1 | The maximum proportion of device memory available for model weights and KV Cache combined. |  |
 | `max_tokens_per_batch` | `int32` | Maximum value of int32 |  | The maximum number of tokens that can be computed per step. |  |
 | `max_seqs_per_batch` | `int32` | 256 |  | The maximum number of sequences that can be computed per step. |  |
+| `disable_prefilling_batch` | `bool` | false | true | Only effective when `instance_role=MIX`; if enabled, at most one prefill request is scheduled per step (no prefill batching), while decode batching remains enabled. |  |
 | `enable_chunked_prefill` | `bool` | true | false | Whether to enable chunked prefill. |  |
 | `enable_schedule_overlap` | `bool` | false | true | Whether to enable asynchronous scheduling. | [Details](./features/async_schedule.md) |
 | `enable_prefix_cache` | `bool` | true | false | Whether to enable prefix cache (not supported by DeepSeek currently). |  |
