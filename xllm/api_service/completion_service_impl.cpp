@@ -212,6 +212,8 @@ void CompletionServiceImpl::process_async_impl(
     }
 
     request_params.decode_address = rpc_request.routing().decode_name();
+    request_params.decode_rpc_address =
+        rpc_request.routing().decode_rpc_address();
   }
 
   auto saved_streaming = request_params.streaming;

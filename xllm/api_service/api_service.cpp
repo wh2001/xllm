@@ -750,14 +750,12 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
     options.dp_size() = request->dp_size();
   }
   if (request->disagg_pd_port() > 0) {
-    if (request->disagg_pd_port() >
-        std::numeric_limits<uint16_t>::max()) {
+    if (request->disagg_pd_port() > std::numeric_limits<uint16_t>::max()) {
       LOG(ERROR) << "Invalid disagg_pd_port in fork request: "
                  << request->disagg_pd_port();
       return false;
     }
-    options.disagg_pd_port() =
-        static_cast<uint16_t>(request->disagg_pd_port());
+    options.disagg_pd_port() = static_cast<uint16_t>(request->disagg_pd_port());
   }
 
   return true;
@@ -1154,9 +1152,9 @@ void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
 }
 
 void APIService::Resize(::google::protobuf::RpcController* controller,
-                         const proto::ResizeRequest* request,
-                         proto::Status* response,
-                         ::google::protobuf::Closure* done) {
+                        const proto::ResizeRequest* request,
+                        proto::Status* response,
+                        ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | response | controller is null";
@@ -1175,9 +1173,9 @@ void APIService::Resize(::google::protobuf::RpcController* controller,
 }
 
 void APIService::ResizeHttp(::google::protobuf::RpcController* controller,
-                             const proto::HttpRequest* request,
-                             proto::HttpResponse* response,
-                             ::google::protobuf::Closure* done) {
+                            const proto::HttpRequest* request,
+                            proto::HttpResponse* response,
+                            ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | response | controller is null";

@@ -273,3 +273,9 @@ DECLARE_string(npu_kernel_backend);
 #endif
 
 DECLARE_int32(health_check_interval_ms);
+
+DECLARE_bool(xllm_debug_mode);
+
+// Convenience macro: behaves like LOG(severity) but only emits when
+// --xllm_debug_mode=true.  Usage:  XLLM_DLOG(INFO) << "message";
+#define XLLM_DLOG(severity) LOG_IF(severity, FLAGS_xllm_debug_mode)

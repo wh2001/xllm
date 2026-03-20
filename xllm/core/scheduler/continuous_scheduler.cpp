@@ -962,11 +962,16 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
       return;
     }
 
+    XLLM_DLOG(INFO) << "[DIAG] engine_->step() starting, batch_count="
+              << batch.size()
+              << ", batch[0].size="
+              << (batch.empty() ? 0 : batch[0].size());
     if (!options_.enable_pd_ooc()) {
       engine_->step(batch);
     } else {
       step_with_pd_ooc(batch);
     }
+    XLLM_DLOG(INFO) << "[DIAG] engine_->step() completed";
 
     kv_cache_manager_->reset_transfer_infos();
     // process request output in batch

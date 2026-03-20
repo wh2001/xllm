@@ -205,6 +205,7 @@ struct WeightSegment {
 
 struct InstanceInfo {
   std::string name = "";
+  std::string model_id = "";
   std::string rpc_address = "";
   // DEFAULT/PREFILL/DECODE/MIX
   std::string type = "";
@@ -213,7 +214,7 @@ struct InstanceInfo {
   std::vector<std::string> addrs;
   std::vector<int64_t> k_cache_ids;
   std::vector<int64_t> v_cache_ids;
-  int32_t dp_size;
+  int32_t dp_size = 0;
   // device network info
   std::vector<std::string> device_ips;
   std::vector<uint16_t> ports;
@@ -242,6 +243,7 @@ struct InstanceInfo {
   nlohmann::json serialize_to_json() const {
     nlohmann::json json_val;
     json_val["name"] = name;
+    json_val["model_id"] = model_id;
     json_val["rpc_address"] = rpc_address;
     if (InstanceRole(type) == InstanceRole::DEFAULT) {
       json_val["type"] = 0;

@@ -95,6 +95,8 @@ class ContinuousScheduler : public Scheduler {
 
     PROPERTY(bool, enable_service_routing) = false;
 
+    PROPERTY(std::string, model_id);
+
     // TODO: think if distinguish prefill and decode priority strategy
     PROPERTY(std::string,
              priority_strategy) = "fcfs";  // priority, deadline, fcfs

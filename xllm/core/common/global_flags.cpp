@@ -576,3 +576,8 @@ DEFINE_int32(beam_width, 1, "Beam width for beam search.");
 DEFINE_int32(health_check_interval_ms,
              3000,
              "Worker health check interval in milliseconds.");
+
+// --- debug config ---
+DEFINE_bool(xllm_debug_mode,
+            false,
+            "Enable verbose diagnostic [DIAG] logging.");

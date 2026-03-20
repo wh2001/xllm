@@ -108,6 +108,11 @@ bool MooncakeTransferEngineCore::initialize(int16_t listen_port,
 
 bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
                                               const std::string& remote_addr) {
+  if (cluster_id != 0 && remote_addr == addr_) {
+    LOG(INFO) << "open_session: skipping self-connection to " << remote_addr;
+    return true;
+  }
+
   std::lock_guard<std::mutex> lock(mutex_);
 
   LOG(INFO) << "open_session, cluster_id=" << cluster_id
@@ -115,7 +120,6 @@ bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
 
   auto it = handles_.find(remote_addr);
   if (it != handles_.end()) {
-    // Session exists, just increment ref count
     it->second.ref_count++;
     LOG(INFO) << "Reusing existing session for " << remote_addr
               << ", ref_count=" << it->second.ref_count;

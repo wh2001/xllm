@@ -799,7 +799,8 @@ void PDOOCScheduler::dispatch_requests() {
     proto::DisaggPDService_Stub* stub = nullptr;
     if (!request->state().decode_address.empty() && requests.size() == 1) {
       selected_instance = request->state().decode_address;
-      stub = create_rpc_channel(request->state().decode_address);
+      stub = create_rpc_channel(request->state().decode_address,
+                                request->state().decode_rpc_address);
     }
 
     // If no decoding instance is specified, randomly select one to create a

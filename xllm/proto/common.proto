@@ -64,6 +64,8 @@ message Routing {
   string prefill_name = 1;
 
   string decode_name = 2;
+
+  string decode_rpc_address = 3;
 }
 
 message Empty {}

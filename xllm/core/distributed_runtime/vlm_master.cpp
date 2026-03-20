@@ -70,6 +70,7 @@ VLMMaster::VLMMaster(const Options& options)
 
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
       .enable_service_routing(options_.enable_service_routing())
+      .model_id(options_.model_id())
       .disable_ttft_profiling(options_.disable_ttft_profiling())
       .enable_forward_interruption(options_.enable_forward_interruption())
       // TODO: support later for VLM.
@@ -392,6 +393,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
                          false, /*enable_schedule_overlap*/
                          callback,
                          nullptr);
+  req_state.decode_rpc_address = sp.decode_rpc_address;
   auto request = std::make_shared<Request>(sp.request_id,
                                            sp.x_request_id,
                                            sp.x_request_time,

@@ -109,7 +109,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // create rpc channel to remote instance,
   // we can get remote instance info from master service.
   proto::DisaggPDService_Stub* create_rpc_channel(
-      const std::string& instance_name);
+      const std::string& instance_name,
+      const std::string& decode_rpc_address = "");
 
   virtual void start_rpc_server();
 

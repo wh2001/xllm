@@ -76,6 +76,8 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
 
 std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
   MULTI_MODEL_STEP_LOCK(FLAGS_enable_xtensor);
+  XLLM_DLOG(INFO) << "[DIAG] LLMWorkerImpl::step() acquired lock"
+            << ", transfer_kv_infos.size=" << input.transfer_kv_infos.size();
 
   Timer timer;
   auto& sampling_params = input.sampling_params;
@@ -109,8 +111,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
   SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
 #endif
 
+  XLLM_DLOG(INFO) << "[DIAG] model_executor_->forward() starting";
   auto model_output = model_executor_->forward(
       input.token_ids, input.positions, kv_caches_, input.input_params);
+  XLLM_DLOG(INFO) << "[DIAG] model_executor_->forward() completed";
   if (!model_output.hidden_states.defined()) {
     return std::nullopt;
   }
@@ -138,8 +142,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
     if (options_.kv_cache_transfer_mode() == "PUSH" &&
         !input.transfer_kv_infos.empty()) {
+      XLLM_DLOG(INFO) << "[DIAG] Waiting for KV push futures (path1)...";
       auto results =
           folly::collectAll(futures).within(std::chrono::seconds(60)).get();
+      XLLM_DLOG(INFO) << "[DIAG] KV push futures completed (path1)";
       for (const auto& result : results) {
         // TODO: Add error handling
         if (!result.value()) {
@@ -199,8 +205,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
 
   if (options_.kv_cache_transfer_mode() == "PUSH" &&
       !input.transfer_kv_infos.empty()) {
+    XLLM_DLOG(INFO) << "[DIAG] Waiting for KV push futures (path2)...";
     auto results =
         folly::collectAll(futures).within(std::chrono::seconds(60)).get();
+    XLLM_DLOG(INFO) << "[DIAG] KV push futures completed (path2)";
     for (const auto& result : results) {
       // TODO: Add error handling
       if (!result.value()) {

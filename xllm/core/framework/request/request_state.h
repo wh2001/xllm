@@ -146,6 +146,11 @@ struct RequestState final {
 
   // decode address.
   std::string decode_address;
+  std::string decode_rpc_address;
+
+  // When true, prefill and decode happen on the same instance without
+  // Mooncake transfer. KV blocks from prefill are reused directly for decode.
+  bool local_pd = false;
 
   torch::Tensor input_embedding;
 

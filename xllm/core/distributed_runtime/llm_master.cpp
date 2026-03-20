@@ -82,6 +82,7 @@ LLMMaster::LLMMaster(const Options& options)
       .instance_role(options_.instance_role())
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
       .enable_service_routing(options_.enable_service_routing())
+      .model_id(options_.model_id())
       .priority_strategy(options_.priority_strategy())
       .enable_online_preempt_offline(options_.enable_online_preempt_offline())
       .enable_profile_step_time(options_.enable_profile_step_time())
@@ -442,6 +443,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                          batch_callback,
                          sp.decode_address,
                          call);
+  req_state.decode_rpc_address = sp.decode_rpc_address;
 
   auto request = std::make_shared<Request>(sp.request_id,
                                            sp.x_request_id,

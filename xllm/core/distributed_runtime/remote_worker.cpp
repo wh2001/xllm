@@ -180,11 +180,14 @@ folly::SemiFuture<std::optional<ForwardOutput>> RemoteWorker::step_async(
 
 folly::SemiFuture<std::optional<RawForwardOutput>> RemoteWorker::step_async(
     const RawForwardInput& input) {
+  XLLM_DLOG(INFO) << "[DIAG-RW] RemoteWorker::step_async called, scheduling task";
   folly::Promise<std::optional<RawForwardOutput>> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
       [this, input = std::move(input), promise = std::move(promise)]() mutable {
+        XLLM_DLOG(INFO) << "[DIAG-RW] threadpool task running, calling execute_model_async";
         channel_->execute_model_async(input, promise);
+        XLLM_DLOG(INFO) << "[DIAG-RW] execute_model_async returned";
       });
 
   return future;
