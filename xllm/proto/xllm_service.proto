@@ -31,6 +31,8 @@ message MasterInfos {
   int32 dp_size = 7;
   // Per-remote-addr weight segments (index matches remote_addrs)
   repeated MasterWeightSegmentList src_weight_segments = 8;
+  // Optional disagg pd rpc port for forked master instances.
+  int32 disagg_pd_port = 9;
 }
 
 // A single weight segment for master wakeup
@@ -47,6 +49,11 @@ message MasterWeightSegmentList {
 message D2DLinkRequest {
   string model_id = 1;
   repeated string device_ips = 2;
+}
+
+message ResizeRequest {
+  string model_id = 1;
+  uint64 new_kv_cache_pages = 2;  // Target total KV cache virtual pages
 }
 
 service XllmAPIService {
@@ -89,4 +96,7 @@ service XllmAPIService {
 
   rpc UnlinkD2D (D2DLinkRequest) returns (Status);
   rpc UnlinkD2DHttp (HttpRequest) returns (HttpResponse);
-}; 
+
+  rpc Resize (ResizeRequest) returns (Status);
+  rpc ResizeHttp (HttpRequest) returns (HttpResponse);
+};

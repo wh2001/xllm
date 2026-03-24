@@ -83,12 +83,15 @@ LLMMaster::LLMMaster(const Options& options)
       .dp_size(options_.dp_size())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_pd_ooc(options_.enable_pd_ooc())
+      .disagg_pd_port(options_.disagg_pd_port())
+
       .enable_schedule_overlap(options_.enable_schedule_overlap())
       .enable_chunked_prefill(options_.enable_chunked_prefill())
       .instance_name(options_.instance_name())
       .instance_role(options_.instance_role())
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
       .enable_service_routing(options_.enable_service_routing())
+      .model_id(options_.model_id())
       .priority_strategy(options_.priority_strategy())
       .enable_online_preempt_offline(options_.enable_online_preempt_offline())
       .enable_profile_step_time(options_.enable_profile_step_time())
@@ -106,8 +109,17 @@ LLMMaster::LLMMaster(const Options& options)
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
   if (options_.enable_service_routing()) {
+    // Profile TTFT and TPOT before registration
+    if (!options_.disable_ttft_profiling()) {
+      scheduler_->profile_ttft();
+      scheduler_->profile_tpot();
+    }
     auto& instance_info = scheduler_->get_instance_info();
     XServiceClient::get_instance()->register_instance(instance_info);
+    // Link to existing peer instances after etcd registration so that
+    // bidirectional links can be established (the remote side can look up
+    // this instance's info) and the mooncake transport is in a stable state.
+    scheduler_->post_register_link();
   }
 
   // construct chat template
@@ -460,6 +472,18 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     };
   }
 
+  if (!batch_callback) {
+    batch_callback =
+        [callback](const std::vector<RequestOutput>& outputs) {
+          std::vector<bool> status_set;
+          status_set.reserve(outputs.size());
+          for (const auto& output : outputs) {
+            status_set.push_back(callback(output));
+          }
+          return status_set;
+        };
+  }
+
   RequestState req_state(std::move(prompt),
                          std::move(local_prompt_tokens),
                          std::move(sampling_param),
@@ -477,6 +501,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                          batch_callback,
                          sp.decode_address,
                          call);
+  req_state.decode_rpc_address = sp.decode_rpc_address;
   req_state.sample_slots = sp.sample_slots;
 
   auto request = std::make_shared<Request>(sp.request_id,
@@ -552,6 +577,10 @@ bool LLMMaster::link_d2d(const std::vector<std::string>& device_ips) {
 
 bool LLMMaster::unlink_d2d(const std::vector<std::string>& device_ips) {
   return engine_->unlink_d2d(device_ips);
+}
+
+bool LLMMaster::resize(uint64_t new_kv_cache_pages) {
+  return engine_->resize(new_kv_cache_pages);
 }
 
 LLMAssistantMaster::LLMAssistantMaster(const Options& options)

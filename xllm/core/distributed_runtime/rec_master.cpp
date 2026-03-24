@@ -502,11 +502,13 @@ RecMaster::RecMaster(const Options& options)
       .num_speculative_tokens(options_.num_speculative_tokens())
       .dp_size(options_.dp_size())
       .enable_disagg_pd(options_.enable_disagg_pd())
+      .disagg_pd_port(options_.disagg_pd_port())
       .enable_schedule_overlap(options_.enable_schedule_overlap())
       .enable_chunked_prefill(options_.enable_chunked_prefill())
       .instance_role(options_.instance_role())
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
-      .enable_service_routing(options_.enable_service_routing());
+      .enable_service_routing(options_.enable_service_routing())
+      .model_id(options_.model_id());
   scheduler_ = create_fixed_steps_scheduler(engine_.get(), scheduler_options);
 
   chat_template_ = nullptr;
@@ -805,6 +807,7 @@ std::shared_ptr<Request> RecMaster::build_request_common(
                          callback,
                          nullptr,
                          sp.decode_address);
+  req_state.decode_rpc_address = sp.decode_rpc_address;
   req_state.rec_type = rec_type_;
   req_state.bos_token_id = model_args_.bos_token_id();
   auto request = std::make_shared<Request>(sp.request_id,

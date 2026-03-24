@@ -65,11 +65,14 @@ VLMMaster::VLMMaster(const Options& options)
       .max_tokens_per_chunk_for_prefill(
           options.max_tokens_per_chunk_for_prefill())
       .enable_disagg_pd(options_.enable_disagg_pd())
+      .disagg_pd_port(options_.disagg_pd_port())
       .enable_chunked_prefill(options_.enable_chunked_prefill())
       .instance_name(options_.instance_name())
       .instance_role(options_.instance_role())
+
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
       .enable_service_routing(options_.enable_service_routing())
+      .model_id(options_.model_id())
       .disable_ttft_profiling(options_.disable_ttft_profiling())
       .enable_forward_interruption(options_.enable_forward_interruption())
       .enable_schedule_overlap(options_.enable_schedule_overlap())
@@ -77,8 +80,14 @@ VLMMaster::VLMMaster(const Options& options)
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
   if (options_.enable_service_routing()) {
+    // Profile TTFT and TPOT before registration
+    if (!options_.disable_ttft_profiling()) {
+      scheduler_->profile_ttft();
+      scheduler_->profile_tpot();
+    }
     auto& instance_info = scheduler_->get_instance_info();
     XServiceClient::get_instance()->register_instance(instance_info);
+    scheduler_->post_register_link();
   }
 
   // construct chat template
@@ -416,6 +425,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
                          options_.enable_schedule_overlap(),
                          callback,
                          nullptr);
+  req_state.decode_rpc_address = sp.decode_rpc_address;
   auto request = std::make_shared<Request>(sp.request_id,
                                            sp.x_request_id,
                                            sp.x_request_time,

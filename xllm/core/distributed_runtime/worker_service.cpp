@@ -512,6 +512,19 @@ void WorkerService::GetDeviceInfo(::google::protobuf::RpcController* controller,
   return;
 }
 
+void WorkerService::GetP2PAddr(::google::protobuf::RpcController* controller,
+                               const proto::Empty* req,
+                               proto::P2PAddr* resp,
+                               ::google::protobuf::Closure* done) {
+  threadpool_->schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    std::string p2p_addr;
+    worker_->get_p2p_addr(p2p_addr);
+    resp->set_addr(p2p_addr);
+  });
+  return;
+}
+
 void WorkerService::LinkCluster(::google::protobuf::RpcController* controller,
                                 const proto::ClusterInfo* req,
                                 proto::Status* resp,
@@ -618,17 +631,19 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
                                  const proto::ForwardInput* pb_forward_input,
                                  proto::ForwardOutput* pb_forward_output,
                                  ::google::protobuf::Closure* done) {
+  XLLM_DLOG(INFO) << "[DIAG-WS] ExecuteModel called (before threadpool schedule)";
   threadpool_->schedule(
       [this, controller, pb_forward_input, pb_forward_output, done]() mutable {
+        XLLM_DLOG(INFO) << "[DIAG-WS] ExecuteModel lambda entered";
         brpc::ClosureGuard done_guard(done);
-        // convert proto::ForwardInput to ForwardInput
 
         Timer timer;
         ForwardInput forward_input;
+        XLLM_DLOG(INFO) << "[DIAG-WS] proto_to_forward_input starting";
         proto_to_forward_input(
             pb_forward_input, forward_input, options_.num_decoding_tokens());
+        XLLM_DLOG(INFO) << "[DIAG-WS] proto_to_forward_input done, calling step()";
 
-        // model output
         torch::Tensor next_tokens;
         torch::Tensor logprobs;
         torch::Tensor top_tokens;
@@ -637,7 +652,6 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
         std::vector<torch::Tensor> mm_embeddings;
         torch::Tensor expert_load_data;
         int32_t prepared_layer_id = -1;
-        // beam search kernel output
         torch::Tensor src_seq_idxes;
         torch::Tensor out_tokens;
         torch::Tensor out_logprobs;
@@ -654,7 +668,7 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
              src_seq_idxes,
              out_tokens,
              out_logprobs);
-        // convert to proto output
+        XLLM_DLOG(INFO) << "[DIAG-WS] step() completed";
         forward_output_to_proto(next_tokens,
                                 logprobs,
                                 top_tokens,

@@ -575,6 +575,8 @@ void ChatServiceImpl::process_rec_chat_request(std::shared_ptr<ChatCall> call) {
       prompt_tokens->emplace_back(rpc_request.token_ids(i));
     }
     request_params.decode_address = rpc_request.routing().decode_name();
+    request_params.decode_rpc_address =
+        rpc_request.routing().decode_rpc_address();
   }
 
   auto saved_streaming = request_params.streaming;
@@ -797,6 +799,8 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
     }
 
     request_params.decode_address = rpc_request.routing().decode_name();
+    request_params.decode_rpc_address =
+        rpc_request.routing().decode_rpc_address();
   }
 
   const bool is_force_reasoning = get_enable_thinking_from_request(

@@ -54,6 +54,10 @@ class Scheduler : public SchedulerBase {
                                    std::vector<int64_t>& tbt) = 0;
 
   virtual const InstanceInfo& get_instance_info() = 0;
+
+  virtual void profile_ttft() {}
+  virtual void profile_tpot() {}
+  virtual void post_register_link() {}
 };
 
 }  // namespace xllm

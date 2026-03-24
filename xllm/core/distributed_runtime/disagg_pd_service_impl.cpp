@@ -134,12 +134,15 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
 void DisaggPDServiceImpl::decode_recv_new_requests(
     const proto::DisaggRequests* request,
     proto::DisaggResponses* response) {
+  XLLM_DLOG(INFO) << "[DIAG] decode_recv_new_requests: reqs_count="
+            << request->reqs_size();
   for (auto& req : request->reqs()) {
     auto resp = response->add_resps();
     resp->set_req_id(req.req_id());
 
     auto new_request = generate_request(req);
     if (new_request == nullptr) {
+      XLLM_DLOG(ERROR) << "[DIAG] generate_request returned nullptr for " << req.req_id();
       resp->set_status_code(500);
       continue;
     }
@@ -148,7 +151,7 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
     Sequence* sequence = sequences[0].get();
 
     if (!scheduler_->try_allocate(sequence)) {
-      // FIXME: set status code
+      XLLM_DLOG(WARNING) << "[DIAG] try_allocate FAILED for " << req.req_id();
       resp->set_status_code(404);
     } else {
       // push the request to scheduler request buffer
@@ -202,6 +205,9 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
       }
 
       resp->set_status_code(200);
+      XLLM_DLOG(INFO) << "[DIAG] decode_recv_new_requests: req " << req.req_id()
+                << " allocated, blocks=" << (blocks.size() - shared_num)
+                << ", dp_rank=" << dp_rank;
     }
   }
 }
@@ -210,6 +216,8 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
 void DisaggPDServiceImpl::decode_recv_first_generation(
     const proto::DisaggGenerationsRequests* request,
     proto::Status* response) {
+  XLLM_DLOG(INFO) << "[DIAG] decode_recv_first_generation: multi_gens_count="
+            << request->multi_gens_size();
   // TODO: we only support one request generation currently
   for (auto& gen : request->multi_gens()) {
     // Process the first token from the tokens array

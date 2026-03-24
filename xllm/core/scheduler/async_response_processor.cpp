@@ -51,7 +51,16 @@ void AsyncResponseProcessor::process_failed_request(
     output.service_request_id = request->service_request_id();
     output.target_xservice_addr = request->source_xservice_addr();
     output.status = status;
-    request->state().output_func(output);
+    if (request->state().output_func) {
+      request->state().output_func(output);
+      return;
+    }
+    if (request->state().outputs_func) {
+      request->state().outputs_func({output});
+      return;
+    }
+    LOG(ERROR) << "Both output_func and outputs_func are empty for request: "
+               << request->request_id();
   };
   if (request->state().response_thread_id < 0) {
     request->state().response_thread_id =
@@ -91,7 +100,16 @@ void AsyncResponseProcessor::process_completed_request(
     RequestOutput req_output =
         request->generate_output(*tokenizer_, &generate_output_threadpool_);
     request->log_statistic(end_2_end_latency_seconds);
-    request->state().output_func(req_output);
+    if (request->state().output_func) {
+      request->state().output_func(req_output);
+      return;
+    }
+    if (request->state().outputs_func) {
+      request->state().outputs_func({req_output});
+      return;
+    }
+    LOG(ERROR) << "Both output_func and outputs_func are empty for request: "
+               << request->request_id();
   };
   if (request->state().response_thread_id < 0) {
     request->state().response_thread_id =
@@ -104,6 +122,10 @@ void AsyncResponseProcessor::process_completed_request(
 
 void AsyncResponseProcessor::batch_process_completed_requests(
     std::vector<std::shared_ptr<Request>>& requests) {
+  if (requests.empty()) {
+    return;
+  }
+
   size_t requests_size = requests.size();
   auto counter = new BlockingCounter(requests_size);
   std::vector<RequestOutput> request_outputs;
@@ -146,13 +168,34 @@ void AsyncResponseProcessor::batch_process_completed_requests(
        request_outputs = std::move(request_outputs)]() mutable {
         counter->wait();
         auto& resp_callback = requests[0]->state().outputs_func;
-        resp_callback(request_outputs);
+        if (resp_callback) {
+          resp_callback(request_outputs);
+          return;
+        }
+
+        LOG(WARNING) << "Batch callback outputs_func is empty, fallback to "
+                        "per-request output_func. request size: "
+                     << requests.size();
+        for (size_t i = 0; i < requests.size(); ++i) {
+          auto& single_callback = requests[i]->state().output_func;
+          if (single_callback) {
+            single_callback(request_outputs[i]);
+            continue;
+          }
+          LOG(ERROR) << "Both output_func and outputs_func are empty for "
+                        "request: "
+                     << requests[i]->request_id();
+        }
       });
 }
 
 // process non-stream requests
 void AsyncResponseProcessor::process_completed_requests(
     std::vector<std::shared_ptr<Request>>& requests) {
+  if (requests.empty()) {
+    return;
+  }
+
   if (!enable_batch_response_) {
     for (size_t i = 0; i < requests.size(); ++i) {
       process_completed_request(std::move(requests[i]));
@@ -210,8 +253,21 @@ void AsyncResponseProcessor::process_stream_request(
           req_output.outputs.push_back(std::move(seq_output.value()));
         }
       }
-      if (!request->state().output_func(req_output)) {
-        // cancel the request if on_stream returns false
+      bool should_continue = true;
+      if (request->state().output_func) {
+        should_continue = request->state().output_func(req_output);
+      } else if (request->state().outputs_func) {
+        std::vector<bool> status_set =
+            request->state().outputs_func({req_output});
+        should_continue = !status_set.empty() && status_set[0];
+      } else {
+        LOG(ERROR) << "Both output_func and outputs_func are empty for "
+                      "request: "
+                   << request->request_id();
+        should_continue = false;
+      }
+      if (!should_continue) {
+        // cancel the request if callback returns false
         request->set_cancel();
       }
     };
@@ -227,6 +283,10 @@ void AsyncResponseProcessor::process_stream_request(
 
 void AsyncResponseProcessor::batch_process_stream_requests(
     std::vector<std::shared_ptr<Request>>& requests) {
+  if (requests.empty()) {
+    return;
+  }
+
   size_t requests_size = requests.size();
   auto counter = new BlockingCounter(requests_size);
   std::vector<RequestOutput> request_outputs;
@@ -300,11 +360,30 @@ void AsyncResponseProcessor::batch_process_stream_requests(
       [counter = std::unique_ptr<BlockingCounter>(counter),
        requests = std::move(requests),
        request_outputs = std::move(request_outputs)]() mutable {
-        auto& resp_callback = requests[0]->state().outputs_func;
         counter->wait();
-        std::vector<bool> status_set = resp_callback(request_outputs);
+        std::vector<bool> status_set;
+        auto& resp_callback = requests[0]->state().outputs_func;
+        if (resp_callback) {
+          status_set = resp_callback(request_outputs);
+        } else {
+          LOG(WARNING) << "Batch callback outputs_func is empty, fallback to "
+                          "per-request output_func. request size: "
+                       << requests.size();
+          status_set.reserve(requests.size());
+          for (size_t i = 0; i < requests.size(); ++i) {
+            auto& single_callback = requests[i]->state().output_func;
+            if (single_callback) {
+              status_set.push_back(single_callback(request_outputs[i]));
+              continue;
+            }
+            LOG(ERROR) << "Both output_func and outputs_func are empty for "
+                          "request: "
+                       << requests[i]->request_id();
+            status_set.push_back(false);
+          }
+        }
         for (size_t i = 0; i < requests.size(); ++i) {
-          if (!status_set[i]) {
+          if (i >= status_set.size() || !status_set[i]) {
             // cancel the request if on_stream returns false
             requests[i]->set_cancel();
           }
@@ -315,6 +394,10 @@ void AsyncResponseProcessor::batch_process_stream_requests(
 // process stream requests
 void AsyncResponseProcessor::process_stream_requests(
     std::vector<std::shared_ptr<Request>>& requests) {
+  if (requests.empty()) {
+    return;
+  }
+
   if (!enable_batch_response_) {
     for (auto& req : requests) {
       process_stream_request(req);

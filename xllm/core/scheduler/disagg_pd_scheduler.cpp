@@ -59,12 +59,18 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
     initialize_rpc_server(server_name_);
     register_instance_info(server_name_, engine);
 
-    // Profile ttft & topt and update instance info (for mix instances)
-    if (!options_.disable_ttft_profiling() &&
-        options_.instance_role().value() == InstanceRole::MIX) {
-      profile_ttft();
-      profile_tpot();
-    }
+    // Profile ttft & tpot and update instance info (for mix instances).
+    // NOTE: Disabled for MIX instances in MIXPD mode. Profiling is only
+    // consumed by xllm-service's SLO_AWARE/LST_IMH load-balance policies,
+    // which are not used in the current MIXPD setup (default policy is RR).
+    // More critically, profiling allocates a large number of KV blocks at
+    // startup, which exhausts the XTensor physical page pool (shared with
+    // model weights) and causes a fatal "No free physical pages" crash.
+    // if (!options_.disable_ttft_profiling() &&
+    //     options_.instance_role().value() == InstanceRole::MIX) {
+    //   profile_ttft();
+    //   profile_tpot();
+    // }
   }
 }
 
@@ -111,10 +117,12 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
                                                Engine* engine) {
   // register instance info
   instance_info_.name = xservice_client_->get_instance_name();
+  instance_info_.model_id = options_.model_id();
   auto rpc_server = ServerRegistry::get_instance().get_server(server_name);
   instance_info_.rpc_address = rpc_server->listen_address();
   instance_info_.type = options_.instance_role().value().to_string();
   LOG(INFO) << "Instance info: instance name = " << instance_info_.name
+            << ", model_id = " << instance_info_.model_id
             << ", instance rpc_address = " << instance_info_.rpc_address
             << ", instance type = " << instance_info_.type;
 
@@ -125,6 +133,7 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
   instance_info_.dp_size = options_.dp_size();
 
   engine->get_device_info(instance_info_.device_ips, instance_info_.ports);
+  engine->get_p2p_addrs(instance_info_.p2p_addrs);
 
   // Get total physical pages per worker (for etcd registration)
 #if defined(USE_NPU)
@@ -135,66 +144,6 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
     }
   }
 #endif
-}
-
-void DisaggPDScheduler::profile_ttft() {
-  LOG(INFO) << "Start profiling TTFT.";
-  // get the maximum prefill token length
-  auto& model_args = engine_->model_args();
-  int32_t max_context_len = model_args.max_position_embeddings();
-  if (!options_.enable_chunked_prefill()) {
-    max_context_len =
-        std::min(max_context_len, options_.max_tokens_per_batch());
-  }
-
-  // warm up
-  profile_manager_->run_request(max_context_len, 0);
-
-  // get TTFT starting from max_context_len
-  for (int32_t token_length = max_context_len; token_length > 1;
-       token_length *= 0.9) {
-    double latency = profile_manager_->run_request(token_length, 0);
-    instance_info_.ttft_profiling_data.emplace_back(
-        std::make_pair(token_length, latency));
-  }
-}
-
-void DisaggPDScheduler::profile_tpot() {
-  LOG(INFO) << "Start profiling TPOT.";
-  // get the maximum token length
-  auto& model_args = engine_->model_args();
-  int32_t max_context_len = model_args.max_position_embeddings();
-  if (!options_.enable_chunked_prefill()) {
-    max_context_len =
-        std::min(max_context_len, options_.max_tokens_per_batch());
-  }
-
-  int32_t num_blocks = kv_cache_manager_->num_blocks();
-  int32_t block_size = kv_cache_manager_->block_size();
-  int32_t max_seqs_per_batch = options_.max_seqs_per_batch();
-  int32_t request_blocks = max_context_len / block_size + 1;
-  int32_t max_batch_size = num_blocks / request_blocks;
-
-  // warm up
-  profile_manager_->run_request(
-      max_context_len, max_context_len - 1, max_batch_size);
-
-  // get TPOT starting from max_context_len, dividing the token length by 2 in
-  // each loop iteration. Skip small token lengths to speed up profiling.
-  for (int32_t token_length = max_context_len; token_length > 64;
-       token_length >>= 1) {
-    max_batch_size = num_blocks / (token_length / block_size + 1);
-    int32_t current_max_batch_size = max_batch_size > max_seqs_per_batch
-                                         ? max_seqs_per_batch
-                                         : max_batch_size;
-    for (int32_t batch_size = current_max_batch_size; batch_size > 0;
-         batch_size *= 0.9) {
-      double latency = profile_manager_->profile_decode_step_time(
-          token_length, batch_size, /*min_context_len=*/64, max_context_len);
-      instance_info_.tpot_profiling_data.emplace_back(
-          token_length, batch_size, latency);
-    }
-  }
 }
 
 // TODO: maybe we should consider update info case even if info already exists
@@ -220,36 +169,57 @@ bool DisaggPDScheduler::check_remote_instance_info(
 }
 
 proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
-    const std::string& instance_name) {
+    const std::string& instance_name,
+    const std::string& decode_rpc_address) {
   std::lock_guard<std::mutex> lock(instance_channel_map_mutex_);
-  auto it = instance_channel_map_.find(instance_name);
+
+  // When decode_rpc_address is provided, use it as the cache key to
+  // distinguish channels to different models on the same instance.
+  std::string channel_key = decode_rpc_address.empty()
+                                ? instance_name
+                                : decode_rpc_address;
+  auto it = instance_channel_map_.find(channel_key);
   if (it == instance_channel_map_.end()) {
-    LOG(INFO) << "Create rpc channel to instance: " << instance_name;
-    // check prefill instance info
-    if (!check_remote_instance_info(instance_name)) {
-      LOG(ERROR) << "Check remote instance info failed, instance name: "
-                 << instance_name;
-      return nullptr;
+    // Always populate remote_instances_info_ for KV cache transfer
+    // (cluster_ids, addrs, k_cache_ids, v_cache_ids, dp_size).
+    if (remote_instances_info_.find(instance_name) ==
+        remote_instances_info_.end()) {
+      if (!check_remote_instance_info(instance_name)) {
+        LOG(ERROR) << "Check remote instance info failed, instance name: "
+                   << instance_name;
+        return nullptr;
+      }
     }
-    // create channel to prefill instance
+
+    std::string target_address;
+    if (!decode_rpc_address.empty()) {
+      target_address = decode_rpc_address;
+      LOG(INFO) << "Create rpc channel using routing-provided address: "
+                << target_address;
+    } else {
+      target_address = remote_instances_info_[instance_name].rpc_address;
+      LOG(INFO) << "Create rpc channel to instance: " << instance_name;
+    }
+
     brpc::Channel* channel = new brpc::Channel();
     brpc::ChannelOptions options;
     options.timeout_ms = FLAGS_rpc_channel_timeout_ms;
     options.max_retry = 3;
     std::string load_balancer = "";
-    if (channel->Init(remote_instances_info_[instance_name].rpc_address.c_str(),
+    if (channel->Init(target_address.c_str(),
                       load_balancer.c_str(),
                       &options) != 0) {
-      LOG(ERROR) << "Fail to initialize channel for "
-                 << remote_instances_info_[instance_name].rpc_address;
-      remote_instances_info_.erase(instance_name);
+      LOG(ERROR) << "Fail to initialize channel for " << target_address;
+      if (decode_rpc_address.empty()) {
+        remote_instances_info_.erase(instance_name);
+      }
       delete channel;
       return nullptr;
     }
 
     proto::DisaggPDService_Stub* stub =
         new proto::DisaggPDService_Stub(channel);
-    instance_channel_map_[instance_name] = stub;
+    instance_channel_map_[channel_key] = stub;
     return stub;
   }
 
@@ -257,13 +227,15 @@ proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
 }
 
 void DisaggPDScheduler::start_rpc_server() {
+  const uint16_t disagg_pd_port = options_.disagg_pd_port().value_or(
+      static_cast<uint16_t>(FLAGS_disagg_pd_port));
   std::unique_ptr<DisaggPDService> service =
       std::make_unique<DisaggPDService>(this, engine_);
   auto rpc_server =
       ServerRegistry::get_instance().register_server(server_name_);
-  if (!rpc_server->start(std::move(service))) {
+  if (!rpc_server->start(std::move(service), disagg_pd_port)) {
     LOG(ERROR) << "Failed to start brpc disagg pd server on port "
-               << FLAGS_disagg_pd_port;
+               << disagg_pd_port;
     return;
   }
 }
@@ -313,6 +285,10 @@ void DisaggPDScheduler::dispatch_requests() {
       break;
     }
 
+    XLLM_DLOG(INFO) << "[DIAG] dispatch_requests: dequeued request "
+              << request->request_id()
+              << ", decode_address=" << request->state().decode_address;
+
     if (request->state().decode_address.empty()) {
       // No decode address provided to the prefill instance, just finish the
       // request.
@@ -323,10 +299,63 @@ void DisaggPDScheduler::dispatch_requests() {
       continue;
     }
 
+    // Local PD: decode on same instance, skip RPC and Mooncake transfer.
+    // xllm-service expects decode tokens via RPC (handle_generation), not
+    // via the HTTP response from the prefill instance.  Close the HTTP
+    // connection and redirect all token output through the RPC path.
+    if (request->state().decode_address ==
+        xservice_client_->get_instance_name()) {
+      XLLM_DLOG(INFO) << "[DIAG] Local PD detected for request "
+                << request->request_id()
+                << ", closing HTTP and switching to RPC path";
+      request->state().local_pd = true;
+
+      // Notify the rate limiter that the prefill slot is released, but do
+      // NOT set finished=true — that would cause send_delta_to_client_brpc
+      // to write "data: [DONE]" into the HTTP stream, which xllm-service
+      // would forward to the client as a spurious completion marker.
+      if (request->state().output_func) {
+        RequestOutput done_output;
+        done_output.request_id = request->request_id();
+        done_output.service_request_id = request->service_request_id();
+        done_output.target_xservice_addr = request->source_xservice_addr();
+        done_output.finished_on_prefill_instance = true;
+        done_output.finished = false;
+        request->state().output_func(done_output);
+      }
+
+      // The original output_func lambda holds the last shared_ptr to the
+      // CompletionCall (brpc stream object).  Overwriting it destroys the
+      // CompletionCall, but state().call_ still holds a raw Call* to it.
+      // Clear it to prevent update_connection_status() from calling the
+      // pure-virtual is_disconnected() on a dangling pointer.
+      // The PA (ProgressiveAttachment) is released when CompletionCall is
+      // destroyed, which closes the HTTP connection without writing [DONE].
+      request->state().call_ = std::nullopt;
+
+      request->state().output_func =
+          [this](const RequestOutput& output) -> bool {
+        if (xservice_client_ == nullptr) return false;
+        auto return_status = xservice_client_->generations({output});
+        return !return_status.empty() && return_status[0];
+      };
+      request->state().outputs_func =
+          [this](const std::vector<RequestOutput>& outputs) {
+            if (xservice_client_ == nullptr) {
+              return std::vector<bool>(outputs.size(), false);
+            }
+            return xservice_client_->generations(outputs);
+          };
+
+      request_queue_.write(request);
+      continue;
+    }
+
     std::vector<std::shared_ptr<Request>> requests;
     requests.emplace_back(request);
     std::string selected_instance = request->state().decode_address;
-    proto::DisaggPDService_Stub* stub = create_rpc_channel(selected_instance);
+    proto::DisaggPDService_Stub* stub = create_rpc_channel(
+        selected_instance, request->state().decode_rpc_address);
     if (stub == nullptr) {
       response_processor_->process_failed_request(
           request, {StatusCode::UNKNOWN, "Fail to create rpc channel"});
@@ -424,7 +453,9 @@ void DisaggPDScheduler::dispatch_requests() {
 
     // TODO: sync rpc here currently
     brpc::Controller cntl;
+    XLLM_DLOG(INFO) << "[DIAG] Sending AddNewRequests RPC to " << selected_instance;
     stub->AddNewRequests(&cntl, &reqs, &resps, nullptr);
+    XLLM_DLOG(INFO) << "[DIAG] AddNewRequests RPC returned, failed=" << cntl.Failed();
     if (cntl.Failed()) {
       LOG(ERROR) << "Failed to add new requests to decode instance : "
                  << selected_instance << ", error text : " << cntl.ErrorText();
@@ -444,6 +475,8 @@ void DisaggPDScheduler::dispatch_requests() {
 
     // check reqs which can not dispatch to D instance,
     // and push back to prefill_request_queue_
+    XLLM_DLOG(INFO) << "[DIAG] resps.resps().size()=" << resps.resps().size()
+              << ", requests.size()=" << requests.size();
     CHECK_EQ(requests.size(), resps.resps().size())
         << "selected_instance : " << selected_instance;
     // insert instance name to linked_instance_
@@ -451,8 +484,12 @@ void DisaggPDScheduler::dispatch_requests() {
       std::lock_guard<std::mutex> lock(linked_instances_mutex_);
       linked_instance_.emplace(selected_instance);
     }
+    XLLM_DLOG(INFO) << "[DIAG] linked_instance_ updated, entering response loop";
     for (size_t i = 0; i < requests.size(); ++i) {
+      XLLM_DLOG(INFO) << "[DIAG] response[" << i << "] status_code="
+                << resps.resps()[i].status_code();
       if (resps.resps()[i].status_code() != 200) {
+        XLLM_DLOG(WARNING) << "[DIAG] status_code != 200, pushing back to prefill queue";
         // push back to prefill_request_queue_
         if (requests[i]->offline()) {
           prefill_request_queue_offline_.enqueue(requests[i]);
@@ -461,6 +498,8 @@ void DisaggPDScheduler::dispatch_requests() {
         }
 
       } else {
+        XLLM_DLOG(INFO) << "[DIAG] status_code=200, setting up TransferKVInfo"
+                  << ", sequences.size=" << requests[i]->sequences().size();
         for (auto& sequence : requests[i]->sequences()) {
           TransferKVInfo info;
           info.request_id = requests[i]->request_id();
@@ -473,6 +512,10 @@ void DisaggPDScheduler::dispatch_requests() {
 
           // XTensor mode: save destination offsets from D-node
           const auto& resp = resps.resps()[i];
+          XLLM_DLOG(INFO) << "[DIAG] xtensor_layer_offsets_size="
+                    << resp.xtensor_layer_offsets_size()
+                    << ", remote_blocks_ids.size="
+                    << info.remote_blocks_ids.size();
           if (resp.xtensor_layer_offsets_size() > 0) {
             info.dst_xtensor_layer_offsets.reserve(
                 resp.xtensor_layer_offsets_size());
@@ -484,18 +527,29 @@ void DisaggPDScheduler::dispatch_requests() {
                                      layer_offsets.v_offsets().end());
               info.dst_xtensor_layer_offsets.emplace_back(std::move(layer));
             }
-            VLOG(5) << "Received XTensor offsets from D-node for request "
-                    << requests[i]->request_id()
-                    << ", num_layers=" << info.dst_xtensor_layer_offsets.size();
+            XLLM_DLOG(INFO) << "[DIAG] Received XTensor offsets, num_layers="
+                      << info.dst_xtensor_layer_offsets.size();
+          } else {
+            XLLM_DLOG(WARNING) << "[DIAG] No XTensor offsets from D-node!";
           }
 
+          XLLM_DLOG(INFO) << "[DIAG] Calling set_transfer_kv_info";
           sequence->kv_state().set_transfer_kv_info(std::move(info));
+          XLLM_DLOG(INFO) << "[DIAG] set_transfer_kv_info done";
         }
 
         // push to request_queue_, and will be executed by engine.
+        XLLM_DLOG(INFO) << "[DIAG] Request dispatched, writing to request_queue_"
+                  << ", remote_instance_info.cluster_ids.size="
+                  << remote_instances_info_[selected_instance].cluster_ids.size()
+                  << ", dp_size="
+                  << remote_instances_info_[selected_instance].dp_size;
         request_queue_.write(requests[i]);
+        XLLM_DLOG(INFO) << "[DIAG] request_queue_.write done for request "
+                  << requests[i]->request_id();
       }
     }
+    XLLM_DLOG(INFO) << "[DIAG] dispatch loop iteration complete";
   }
 }
 
@@ -512,6 +566,14 @@ void DisaggPDScheduler::prefill_send_first_generation() {
     auto request = running_requests_[i];
     // Check if the request is a recently completed prefill request
     if (request->sequences()[0]->num_generated_tokens() == 1) {
+      // Local PD: keep the request in running_requests_ so the normal
+      // scheduler flow transitions it to decode via running_queue_.
+      // No RPC, no KV deallocation, no Mooncake transfer needed.
+      if (request->state().local_pd) {
+        XLLM_DLOG(INFO) << "[DIAG] Local PD request " << request->request_id()
+                  << " completed prefill, staying in running for decode";
+        continue;
+      }
       request->log_statistic(request->elapsed_seconds());
       requests.emplace_back(request);
       if (!request->state().stream) {
@@ -530,8 +592,29 @@ void DisaggPDScheduler::prefill_send_first_generation() {
     return;
   }
 
+  XLLM_DLOG(INFO) << "[DIAG] prefill_send_first_generation: sending "
+            << requests.size() << " requests to decode";
+
   prefill_threadpool_.schedule([this,
                                 requests = std::move(requests)]() mutable {
+    // process_stream_request() dispatches the first-token write to the
+    // response_threadpool_ asynchronously.  We must wait for that write
+    // to complete before releasing the HTTP ProgressiveAttachment,
+    // otherwise the first token is lost (data race / empty PA).
+    response_processor_->wait_completion();
+
+    // Now safe: release the PA for streaming requests.  This completes
+    // the HTTP response so that handle_first_response on xllm-service
+    // forwards the first token to the client BEFORE the decode instance
+    // starts generating tokens (via the FirstGeneration RPC below).
+    for (auto& request : requests) {
+      if (request->state().stream) {
+        request->state().call_ = std::nullopt;
+        request->state().output_func = nullptr;
+        request->state().outputs_func = nullptr;
+      }
+    }
+
     // send request first token to remote instance
     // TODO: here we only support one sequence for now.
     for (auto& request : requests) {
@@ -598,7 +681,11 @@ void DisaggPDScheduler::prefill_send_first_generation() {
       // TODO: Async call later
       proto::Status resp;
       brpc::Controller cntl;
+      XLLM_DLOG(INFO) << "[DIAG] Sending FirstGeneration RPC for request "
+                << request->request_id();
       stub->FirstGeneration(&cntl, &gens, &resp, nullptr);
+      XLLM_DLOG(INFO) << "[DIAG] FirstGeneration RPC returned, failed="
+                << cntl.Failed() << ", ok=" << resp.ok();
 
       if (cntl.Failed() || !resp.ok()) {
         LOG(ERROR) << "Failed to send first generation to decode instance : "

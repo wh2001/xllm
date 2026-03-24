@@ -57,6 +57,8 @@ DECLARE_int32(max_tokens_per_batch);
 
 DECLARE_int32(max_seqs_per_batch);
 
+DECLARE_bool(disable_prefilling_batch);
+
 DECLARE_int32(max_tokens_per_chunk_for_prefill);
 
 // --- speculative inference config ---
@@ -313,3 +315,9 @@ DECLARE_bool(enable_intralayer_addnorm);
 #endif
 
 DECLARE_int32(health_check_interval_ms);
+
+DECLARE_bool(xllm_debug_mode);
+
+// Convenience macro: behaves like LOG(severity) but only emits when
+// --xllm_debug_mode=true.  Usage:  XLLM_DLOG(INFO) << "message";
+#define XLLM_DLOG(severity) LOG_IF(severity, FLAGS_xllm_debug_mode)

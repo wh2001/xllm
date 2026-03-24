@@ -21,6 +21,7 @@ limitations under the License.
 #include <json2pb/pb_to_json.h>
 
 #include <filesystem>
+#include <limits>
 #include <nlohmann/json.hpp>
 
 #include "call.h"
@@ -878,6 +879,14 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
   if (request->dp_size() > 0) {
     options.dp_size() = request->dp_size();
   }
+  if (request->disagg_pd_port() > 0) {
+    if (request->disagg_pd_port() > std::numeric_limits<uint16_t>::max()) {
+      LOG(ERROR) << "Invalid disagg_pd_port in fork request: "
+                 << request->disagg_pd_port();
+      return false;
+    }
+    options.disagg_pd_port() = static_cast<uint16_t>(request->disagg_pd_port());
+  }
 
   return true;
 }
@@ -1259,6 +1268,77 @@ void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
   }
   bool status = master->unlink_d2d(
       {req_pb->device_ips().begin(), req_pb->device_ips().end()});
+  resp_pb->set_ok(status);
+
+  json2pb::Pb2JsonOptions json_options;
+  json_options.bytes_to_base64 = false;
+  std::string err_msg;
+  butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
+  if (!json2pb::ProtoMessageToJson(
+          *resp_pb, &json_output, json_options, &err_msg)) {
+    LOG(ERROR) << "proto to json failed: " << err_msg;
+    return;
+  }
+}
+
+void APIService::Resize(::google::protobuf::RpcController* controller,
+                        const proto::ResizeRequest* request,
+                        proto::Status* response,
+                        ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+
+  if (masters_.find(request->model_id()) == masters_.end()) {
+    LOG(ERROR) << "Master for model " << request->model_id() << " not found";
+    response->set_ok(false);
+    return;
+  }
+
+  auto master = masters_[request->model_id()];
+  bool status = master->resize(request->new_kv_cache_pages());
+  response->set_ok(status);
+}
+
+void APIService::ResizeHttp(::google::protobuf::RpcController* controller,
+                            const proto::HttpRequest* request,
+                            proto::HttpResponse* response,
+                            ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+
+  auto arena = response->GetArena();
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::ResizeRequest>(arena);
+  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  std::string error;
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << error;
+    return;
+  }
+
+  if (masters_.find(req_pb->model_id()) == masters_.end()) {
+    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
+    ctrl->SetFailed("Master for model not found");
+    return;
+  }
+
+  auto master = masters_[req_pb->model_id()];
+  bool status = master->resize(req_pb->new_kv_cache_pages());
+
   resp_pb->set_ok(status);
 
   json2pb::Pb2JsonOptions json_options;

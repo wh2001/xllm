@@ -80,6 +80,10 @@ void RemoteWorker::get_device_info(std::string& device_ip, uint16_t& port) {
   channel_->get_device_info(device_ip, port);
 }
 
+void RemoteWorker::get_p2p_addr(std::string& p2p_addr) {
+  channel_->get_p2p_addr(p2p_addr);
+}
+
 void RemoteWorker::get_cache_info(uint64_t& cluster_id,
                                   std::string& addr,
                                   int64_t& k_cache_id,
@@ -178,11 +182,14 @@ folly::SemiFuture<std::optional<ForwardOutput>> RemoteWorker::step_async(
 
 folly::SemiFuture<std::optional<RawForwardOutput>> RemoteWorker::step_async(
     const RawForwardInput& input) {
+  XLLM_DLOG(INFO) << "[DIAG-RW] RemoteWorker::step_async called, scheduling task";
   folly::Promise<std::optional<RawForwardOutput>> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
       [this, input = std::move(input), promise = std::move(promise)]() mutable {
+        XLLM_DLOG(INFO) << "[DIAG-RW] threadpool task running, calling execute_model_async";
         channel_->execute_model_async(input, promise);
+        XLLM_DLOG(INFO) << "[DIAG-RW] execute_model_async returned";
       });
 
   return future;

@@ -154,6 +154,10 @@ DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
 
 DEFINE_int32(max_seqs_per_batch, 1024, "Max number of sequences per batch.");
 
+DEFINE_bool(disable_prefilling_batch,
+            false,
+            "Disable batching for prefill requests when instance_role is MIX.");
+
 DEFINE_bool(enable_schedule_overlap,
             false,
             "Whether to enable schedule overlap.");
@@ -664,3 +668,8 @@ DEFINE_bool(enable_xattention_one_stage,
             false,
             "Whether to force xattention one-stage decode for rec "
             "multi-round mode.");
+
+// --- debug config ---
+DEFINE_bool(xllm_debug_mode,
+            false,
+            "Enable verbose diagnostic [DIAG] logging.");

@@ -167,6 +167,8 @@ void RecCompletionServiceImpl::process_async_impl(
     }
 
     request_params.decode_address = rpc_request.routing().decode_name();
+    request_params.decode_rpc_address =
+        rpc_request.routing().decode_rpc_address();
   }
 
   const auto& rpc_request_ref = call->request();

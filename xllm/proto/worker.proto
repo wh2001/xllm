@@ -104,6 +104,10 @@ message DeviceInfo {
   uint32 listen_port = 2;
 }
 
+message P2PAddr {
+  string addr = 1;
+}
+
 message CacheInfo {
   uint64 cluster_id = 1;
   string addr = 4;
@@ -291,6 +295,7 @@ service DistributeWorker {
   rpc AllocateKVCacheWithTransfer(AllocateKVCacheRequest) returns (Status) {}
   rpc PullKVCache(PullKVCacheRequest) returns (Status) {}
   rpc GetDeviceInfo(Empty) returns (DeviceInfo) {}
+  rpc GetP2PAddr(Empty) returns (P2PAddr) {}
   rpc GetCacheInfo(Empty) returns (CacheInfo) {}
   rpc LinkCluster(ClusterInfo) returns (Status) {}
   rpc UnlinkCluster(ClusterInfo) returns (Status) {}

@@ -69,11 +69,9 @@ bool MooncakeTransferEngineCore::initialize(int16_t listen_port,
   std::string hostname;
   int32_t phy_id = FLAGS_npu_phy_id;
   if (phy_id != -1) {
-    hostname = host_ip_ + ":" + std::to_string(listen_port_) + ":npu_" +
-               std::to_string(phy_id);
+    hostname = host_ip_ + ":" + std::to_string(listen_port_);
   } else {
-    hostname = host_ip_ + ":" + std::to_string(listen_port_) + ":npu_" +
-               std::to_string(device_id);
+    hostname = host_ip_ + ":" + std::to_string(listen_port_);
   }
 
   if (engine_->init("P2PHANDSHAKE", hostname, "", 0)) {
@@ -108,6 +106,11 @@ bool MooncakeTransferEngineCore::initialize(int16_t listen_port,
 
 bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
                                               const std::string& remote_addr) {
+  if (cluster_id != 0 && remote_addr == addr_) {
+    LOG(INFO) << "open_session: skipping self-connection to " << remote_addr;
+    return true;
+  }
+
   std::lock_guard<std::mutex> lock(mutex_);
 
   LOG(INFO) << "open_session, cluster_id=" << cluster_id
@@ -115,7 +118,6 @@ bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
 
   auto it = handles_.find(remote_addr);
   if (it != handles_.end()) {
-    // Session exists, just increment ref count
     it->second.ref_count++;
     LOG(INFO) << "Reusing existing session for " << remote_addr
               << ", ref_count=" << it->second.ref_count;

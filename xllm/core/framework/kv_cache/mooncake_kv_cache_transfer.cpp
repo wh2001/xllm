@@ -75,6 +75,12 @@ bool MooncakeKVCacheTransferBase::link_cluster(const uint64_t cluster_id,
   LOG(INFO) << "link_cluster, cluster_id=" << cluster_id
             << ", remote_addr=" << remote_addr;
 
+  if (remote_addr == addr_) {
+    LOG(INFO) << "Skipping self-connection in link_cluster, local addr="
+              << addr_;
+    return true;
+  }
+
   return mooncake_te_->open_session(cluster_id, remote_addr);
 }
 
@@ -454,6 +460,18 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_xtensor_mode(
     return false;
   }
 
+  XLLM_DLOG(INFO) << "[DIAG] push_kv_blocks_xtensor_mode starting"
+            << ", model_id=" << model_id_
+            << ", num_layers=" << num_layers_
+            << ", merged_kv_infos.size=" << merged_kv_infos.size();
+  for (const auto& pair : merged_kv_infos) {
+    XLLM_DLOG(INFO) << "[DIAG] KV push target: dst_addr=" << pair.second.dst_addr
+              << ", src_blocks.size=" << pair.second.src_blocks.size()
+              << ", dst_blocks.size=" << pair.second.dst_blocks.size()
+              << ", dst_xtensor_layer_offsets.size="
+              << pair.second.dst_xtensor_layer_offsets.size();
+  }
+
   auto& allocator = XTensorAllocator::get_instance();
 
   for (int64_t layer_index = 0; layer_index < num_layers_; ++layer_index) {
@@ -527,7 +545,8 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_xtensor_mode(
     }
   }
 
-  VLOG(1) << "push_kv_blocks_xtensor_mode success, num_layers=" << num_layers_;
+  XLLM_DLOG(INFO) << "[DIAG] push_kv_blocks_xtensor_mode completed successfully"
+            << ", num_layers=" << num_layers_;
   return true;
 }
 

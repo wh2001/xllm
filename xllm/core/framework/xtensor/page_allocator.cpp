@@ -120,6 +120,7 @@ bool PageAllocator::sleep_model(const std::string& model_id,
   size_t total_phy_pages_to_release = 0;
   size_t phy_pages_per_virt = 0;
   size_t weight_pages = 0;
+  bool weight_on_device = false;
 
   {
     std::unique_lock<std::mutex> lock(mtx_);
@@ -147,6 +148,7 @@ bool PageAllocator::sleep_model(const std::string& model_id,
     state.is_sleeping = true;
     phy_pages_per_virt = state.phy_pages_per_virt_page;
     weight_pages = state.weight_pages_allocated;
+    weight_on_device = state.weight_on_device;
 
     // Collect all mapped pages (reserved + allocated) from each DP group
     for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
@@ -174,8 +176,8 @@ bool PageAllocator::sleep_model(const std::string& model_id,
               << (skip_weight_release ? 0 : weight_pages) << " weight pages";
   }
 
-  // Release weight pages first (reuse existing function)
-  if (!skip_weight_release && weight_pages > 0) {
+  // Release weight pages first (only if physically allocated on device)
+  if (!skip_weight_release && weight_pages > 0 && weight_on_device) {
     if (!free_weight_pages(model_id, weight_pages)) {
       LOG(ERROR) << "Failed to free weight pages during sleep for model "
                  << model_id << ", keep consumed weight page count";
@@ -357,6 +359,9 @@ bool PageAllocator::wakeup_model(const std::string& model_id) {
     auto it = model_states_.find(model_id);
     if (it != model_states_.end()) {
       it->second.is_sleeping = false;
+      if (weight_pages > 0) {
+        it->second.weight_on_device = true;
+      }
     }
     update_memory_usage();
   }
@@ -708,6 +713,108 @@ void PageAllocator::trim_kv_cache(const std::string& model_id,
   }
 }
 
+bool PageAllocator::resize_kv_cache(const std::string& model_id,
+                                     size_t new_total_virt_pages) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  CHECK(initialized_) << "PageAllocator not initialized";
+
+  ModelState& state = get_model_state(model_id);
+  size_t old_total = state.num_total_virt_pages;
+
+  if (new_total_virt_pages == old_total) {
+    LOG(INFO) << "resize_kv_cache: model=" << model_id
+              << " already has " << old_total << " pages, no-op";
+    return true;
+  }
+
+  int32_t model_dp_size =
+      state.model_dp_size > 0 ? state.model_dp_size : dp_size_;
+
+  if (new_total_virt_pages > old_total) {
+    // --- Expand ---
+    size_t pages_to_add = new_total_virt_pages - old_total;
+
+    // Check physical page availability across all DP groups
+    size_t phy_pages_needed = pages_to_add * state.phy_pages_per_virt_page;
+    for (int32_t dp = 0; dp < model_dp_size; ++dp) {
+      if (!has_enough_phy_pages_for_dp(model_id, dp, phy_pages_needed)) {
+        LOG(ERROR) << "resize_kv_cache: not enough phy pages for model="
+                   << model_id << " dp_rank=" << dp
+                   << " needed=" << phy_pages_needed;
+        return false;
+      }
+    }
+
+    // Add new virtual pages to each DP group
+    for (int32_t dp = 0; dp < model_dp_size; ++dp) {
+      auto& dp_pages = state.dp_group_pages[dp];
+      for (size_t i = 0; i < pages_to_add; ++i) {
+        int64_t new_page_id = static_cast<int64_t>(old_total + i);
+        dp_pages.free_virt_page_list.push_back(new_page_id);
+        dp_pages.num_free_virt_pages++;
+      }
+    }
+
+    state.num_total_virt_pages = new_total_virt_pages;
+    LOG(INFO) << "resize_kv_cache: expanded model=" << model_id
+              << " from " << old_total << " to " << new_total_virt_pages
+              << " virt pages";
+  } else {
+    // --- Shrink ---
+    size_t pages_to_remove = old_total - new_total_virt_pages;
+
+    // Verify we have enough free pages to remove in each DP group
+    for (int32_t dp = 0; dp < model_dp_size; ++dp) {
+      auto& dp_pages = state.dp_group_pages[dp];
+      size_t available_free = dp_pages.free_virt_page_list.size() +
+                              dp_pages.reserved_virt_page_list.size();
+      if (available_free < pages_to_remove) {
+        LOG(ERROR) << "resize_kv_cache: cannot shrink model=" << model_id
+                   << " dp_rank=" << dp << ": only " << available_free
+                   << " free/reserved pages available, need " << pages_to_remove;
+        return false;
+      }
+    }
+
+    // Remove free pages from each DP group (prefer free_virt_page_list first)
+    for (int32_t dp = 0; dp < model_dp_size; ++dp) {
+      auto& dp_pages = state.dp_group_pages[dp];
+      size_t remaining = pages_to_remove;
+
+      // Remove from free list first
+      while (remaining > 0 && !dp_pages.free_virt_page_list.empty()) {
+        dp_pages.free_virt_page_list.pop_back();
+        dp_pages.num_free_virt_pages--;
+        remaining--;
+      }
+
+      // Remove from reserved list (these need physical page release)
+      if (remaining > 0 && !dp_pages.reserved_virt_page_list.empty()) {
+        size_t from_reserved = std::min(
+            remaining, dp_pages.reserved_virt_page_list.size());
+        // Release physical pages for reserved pages being removed
+        release_phy_pages_for_dp(
+            model_id, dp,
+            from_reserved * state.phy_pages_per_virt_page);
+        for (size_t i = 0; i < from_reserved; ++i) {
+          dp_pages.reserved_virt_page_list.pop_back();
+        }
+        remaining -= from_reserved;
+      }
+    }
+
+    state.num_total_virt_pages = new_total_virt_pages;
+    LOG(INFO) << "resize_kv_cache: shrunk model=" << model_id
+              << " from " << old_total << " to " << new_total_virt_pages
+              << " virt pages";
+  }
+
+  update_memory_usage();
+  cond_.notify_all();
+  return true;
+}
+
 bool PageAllocator::alloc_weight_pages(const std::string& model_id,
                                        size_t num_pages) {
   int32_t model_world_size = 0;
@@ -744,6 +851,7 @@ bool PageAllocator::alloc_weight_pages(const std::string& model_id,
     }
 
     state.weight_pages_allocated = num_pages;
+    state.weight_on_device = true;
     update_memory_usage();
   }
 
@@ -781,6 +889,7 @@ bool PageAllocator::free_weight_pages(const std::string& model_id,
 
     // Update per-worker page usage
     ModelState& state = get_model_state(model_id);
+    state.weight_on_device = false;
     int32_t model_world_size =
         state.model_world_size > 0 ? state.model_world_size : max_world_size_;
     for (int32_t i = 0; i < model_world_size && i < max_world_size_; ++i) {

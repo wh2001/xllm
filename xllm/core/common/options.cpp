@@ -56,12 +56,15 @@ std::string Options::to_string() const {
      << ", enable_prefill_sp: " << enable_prefill_sp()
      << ", master_node_addr: " << master_node_addr().value_or("null")
      << ", instance_role: " << instance_role().to_string()
-     << ", device_ip: " << device_ip().value_or("null")
+     << ", device_ip: " << device_ip().value_or("null") << ", disagg_pd_port: "
+     << (disagg_pd_port().has_value() ? std::to_string(disagg_pd_port().value())
+                                      : "null")
      << ", transfer_listen_port: " << transfer_listen_port()
      << ", nnodes: " << nnodes() << ", node_rank: " << node_rank()
      << ", enable_schedule_overlap: " << enable_schedule_overlap()
      << ", enable_disagg_pd: " << enable_disagg_pd()
      << ", enable_pd_ooc: " << enable_pd_ooc()
+
      << ", kv_cache_dtype: " << kv_cache_dtype()
      << ", kv_cache_transfer_mode: " << kv_cache_transfer_mode()
      << ", etcd_addr: " << etcd_addr().value_or("null")

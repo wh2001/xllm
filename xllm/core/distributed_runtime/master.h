@@ -50,6 +50,8 @@ class Master {
     return false;
   }
 
+  virtual bool resize(uint64_t new_kv_cache_pages) { return false; }
+
   MasterStatus get_master_status() const { return master_status_; }
 
   bool is_sleeping() const { return master_status_ != MasterStatus::WAKEUP; }

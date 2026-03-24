@@ -135,6 +135,7 @@ struct RequestParams {
 
   // decode address.
   std::string decode_address;
+  std::string decode_rpc_address;
 
   // JSON-based tools (replacing proto_tools)
   std::vector<xllm::JsonTool> tools;

@@ -124,6 +124,9 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   instance_info_.name = options_.instance_name().value_or("");
   instance_info_.type = options_.instance_role().value().to_string();
   instance_info_.dp_size = options.dp_size();
+  instance_info_.enable_disagg_pd = options_.enable_disagg_pd();
+  engine_->get_device_info(instance_info_.device_ips, instance_info_.ports);
+  engine_->get_p2p_addrs(instance_info_.p2p_addrs);
 
   if (options_.enable_schedule_overlap()) {
     min_speculative_tokens_required_ = options_.num_speculative_tokens() * 2;
@@ -133,6 +136,63 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
 }
 
 ContinuousScheduler::~ContinuousScheduler() { running_requests_.clear(); }
+
+void ContinuousScheduler::profile_ttft() {
+  LOG(INFO) << "Start profiling TTFT.";
+  auto& model_args = engine_->model_args();
+  int32_t max_context_len = model_args.max_position_embeddings();
+  if (!options_.enable_chunked_prefill()) {
+    max_context_len =
+        std::min(max_context_len, options_.max_tokens_per_batch());
+  }
+
+  // warm up
+  profile_manager_->run_request(max_context_len, 0);
+
+  std::vector<std::pair<int32_t, double>> ttft_data;
+  for (int32_t token_length = max_context_len; token_length > 1;
+       token_length *= 0.9) {
+    double latency = profile_manager_->run_request(token_length, 0);
+    ttft_data.emplace_back(token_length, latency);
+  }
+  instance_info_.ttft_profiling_data[FLAGS_model_id] = std::move(ttft_data);
+}
+
+void ContinuousScheduler::profile_tpot() {
+  LOG(INFO) << "Start profiling TPOT.";
+  auto& model_args = engine_->model_args();
+  int32_t max_context_len = model_args.max_position_embeddings();
+  if (!options_.enable_chunked_prefill()) {
+    max_context_len =
+        std::min(max_context_len, options_.max_tokens_per_batch());
+  }
+
+  int32_t num_blocks = kv_cache_manager_->num_blocks();
+  int32_t block_size = kv_cache_manager_->block_size();
+  int32_t max_seqs_per_batch = options_.max_seqs_per_batch();
+  int32_t request_blocks = max_context_len / block_size + 1;
+  int32_t max_batch_size = num_blocks / request_blocks;
+
+  // warm up
+  profile_manager_->run_request(
+      max_context_len, max_context_len - 1, max_batch_size);
+
+  std::vector<std::tuple<int32_t, int32_t, double>> tpot_data;
+  for (int32_t token_length = max_context_len; token_length > 64;
+       token_length >>= 1) {
+    max_batch_size = num_blocks / (token_length / block_size + 1);
+    int32_t current_max_batch_size = max_batch_size > max_seqs_per_batch
+                                         ? max_seqs_per_batch
+                                         : max_batch_size;
+    for (int32_t batch_size = current_max_batch_size; batch_size > 0;
+         batch_size *= 0.9) {
+      double latency = profile_manager_->profile_decode_step_time(
+          token_length, batch_size, /*min_context_len=*/64, max_context_len);
+      tpot_data.emplace_back(token_length, batch_size, latency);
+    }
+  }
+  instance_info_.tpot_profiling_data[FLAGS_model_id] = std::move(tpot_data);
+}
 
 bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
@@ -228,6 +288,12 @@ void ContinuousScheduler::handle_prefill_requests(
   // they may contian many sequences, so we should check here.
   bool budget_exhausted = false;
   bool blocks_exhausted = false;
+  const bool disable_prefill_batch_in_mix =
+      FLAGS_disable_prefilling_batch && options_.instance_role().has_value() &&
+      options_.instance_role().value() == InstanceRole::MIX;
+  if (disable_prefill_batch_in_mix && !running_sequences_.empty()) {
+    return;
+  }
   while (!waiting_priority_queue.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 && latency_budget > estimate_latency) {
     if (!options_.enable_disagg_pd() &&
@@ -375,6 +441,9 @@ void ContinuousScheduler::handle_prefill_requests(
     running_sequences_budgets_.insert(running_sequences_budgets_.end(),
                                       prefill_sequences_budget.begin(),
                                       prefill_sequences_budget.end());
+    if (disable_prefill_batch_in_mix) {
+      break;
+    }
   }
   // maybe can pre-compute if prompt beyond length
   if (running_sequences_.empty() && !waiting_priority_queue.empty() &&
@@ -1042,11 +1111,16 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
       return;
     }
 
+    XLLM_DLOG(INFO) << "[DIAG] engine_->step() starting, batch_count="
+              << batch.size()
+              << ", batch[0].size="
+              << (batch.empty() ? 0 : batch[0].size());
     if (!options_.enable_pd_ooc()) {
       engine_->step(batch);
     } else {
       step_with_pd_ooc(batch);
     }
+    XLLM_DLOG(INFO) << "[DIAG] engine_->step() completed";
 
     kv_cache_manager_->reset_transfer_infos();
     // process request output in batch

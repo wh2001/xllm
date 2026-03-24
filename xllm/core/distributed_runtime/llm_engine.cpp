@@ -774,6 +774,18 @@ void LLMEngine::get_device_info(std::vector<std::string>& device_ips,
   ports = worker_ports_;
 }
 
+void LLMEngine::get_p2p_addrs(std::vector<std::string>& p2p_addrs) {
+#if defined(USE_NPU)
+  p2p_addrs.reserve(worker_clients_num_);
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
+       ++worker_rank) {
+    std::string p2p_addr;
+    worker_clients_[worker_rank]->get_p2p_addr(p2p_addr);
+    p2p_addrs.emplace_back(std::move(p2p_addr));
+  }
+#endif
+}
+
 void LLMEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
                                std::vector<std::string>& addrs,
                                std::vector<int64_t>& k_cache_ids,
@@ -1019,7 +1031,10 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
       << "Split DP batch failed with dp_size as " << dp_size_
       << " and actual batch size as " << batch.size() << ".";
 
+  XLLM_DLOG(INFO) << "[DIAG-ENGINE] prepare_inputs starting";
   auto raw_forward_inputs = prepare_inputs(batch);
+  XLLM_DLOG(INFO) << "[DIAG-ENGINE] prepare_inputs done, size="
+            << raw_forward_inputs.size();
   DCHECK(dp_size_ == raw_forward_inputs.size())
       << "The processed raw forward inputs size " << raw_forward_inputs.size()
       << " is not equal to dp size " << dp_size_ << ".";
@@ -1030,12 +1045,16 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   // update dp related global paramters and then execute model
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     auto dp_rank = worker_rank / dp_local_tp_size_;
+    XLLM_DLOG(INFO) << "[DIAG-ENGINE] dispatching step_async to worker_rank="
+              << worker_rank;
     futures.emplace_back(
         worker_clients_[worker_rank]->step_async(raw_forward_inputs[dp_rank]));
   }
 
+  XLLM_DLOG(INFO) << "[DIAG-ENGINE] all step_async dispatched, waiting collectAll";
   // wait for the all future to complete
   auto results = folly::collectAll(futures).get();
+  XLLM_DLOG(INFO) << "[DIAG-ENGINE] collectAll completed";
 
   if (FLAGS_enable_eplb && !options_.enable_schedule_overlap()) {
     process_eplb_data(results);
@@ -1318,6 +1337,43 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
   }
   LOG(INFO) << "Wakeup finished for LLM engine.";
 
+  return true;
+}
+
+bool LLMEngine::resize(uint64_t new_kv_cache_pages) {
+  if (!FLAGS_enable_xtensor) {
+    LOG(WARNING) << "resize requires FLAGS_enable_xtensor to be enabled";
+    return false;
+  }
+
+  const std::string& model_id = options_.model_id();
+  auto& page_allocator = PageAllocator::get_instance();
+
+  size_t current_pages = page_allocator.get_num_total_virt_pages(model_id);
+  LOG(INFO) << "Resize KV cache for model=" << model_id
+            << " current_pages=" << current_pages
+            << " new_pages=" << new_kv_cache_pages;
+
+  if (new_kv_cache_pages == current_pages) {
+    LOG(INFO) << "Resize no-op, already at target size";
+    return true;
+  }
+
+  if (new_kv_cache_pages < current_pages) {
+    // Shrink: trim reserved pages first, then resize
+    for (uint32_t dp = 0; dp < dp_size_; ++dp) {
+      page_allocator.trim_kv_cache(model_id, dp);
+    }
+  }
+
+  if (!page_allocator.resize_kv_cache(model_id,
+                                       static_cast<size_t>(new_kv_cache_pages))) {
+    LOG(ERROR) << "Failed to resize KV cache for model=" << model_id;
+    return false;
+  }
+
+  LOG(INFO) << "Resize KV cache succeeded for model=" << model_id
+            << " new_pages=" << new_kv_cache_pages;
   return true;
 }
 

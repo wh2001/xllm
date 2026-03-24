@@ -379,6 +379,15 @@ void WorkerImpl::get_device_info(std::string& device_ip, uint16_t& port) {
   port = options_.transfer_listen_port();
 }
 
+void WorkerImpl::get_p2p_addr(std::string& p2p_addr) {
+#if defined(USE_NPU)
+  auto& core = MooncakeTransferEngineCore::get_instance();
+  if (core.is_initialized()) {
+    p2p_addr = core.addr();
+  }
+#endif
+}
+
 void WorkerImpl::get_cache_info(uint64_t& cluster_id,
                                 std::string& addr,
                                 int64_t& k_cache_id,
@@ -527,27 +536,23 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
 
 void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                              ForwardInput& processed_input) {
+  XLLM_DLOG(INFO) << "[DIAG-WI] prepare_work_before_execute entered";
 #if defined(USE_NPU)
-  // Without device_capture_lock, ACL graph capture will be interrupted by the
-  // synchronization H2D of data update streams asynchronously scheduled by
-  // other threads, even if the capture and synchronization streams are not
-  // the same, and even if capture_mode is set to
-  // ACL_MODEL_RI_CAPTURE_MODE_THREAD_LOCAL.
-  // The possible reason is that ACL graph capture may use additional
-  // auxiliary streams, and these auxiliary streams might be the same as the
-  // asynchronously scheduled data update streams.
-
   std::optional<std::unique_lock<std::mutex>> lock_guard;
   if (FLAGS_enable_graph) {
+    XLLM_DLOG(INFO) << "[DIAG-WI] acquiring DeviceCaptureLock";
     auto& capture_lock =
         ::xllm::npu::DeviceCaptureLock::get_instance().get_lock(
             device_.index());
     lock_guard.emplace(capture_lock);
+    XLLM_DLOG(INFO) << "[DIAG-WI] DeviceCaptureLock acquired";
   }
 #endif
   c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
 
+  XLLM_DLOG(INFO) << "[DIAG-WI] input.to(device) starting";
   processed_input = input.to(device_, dtype_);
+  XLLM_DLOG(INFO) << "[DIAG-WI] input.to(device) done";
   auto& input_params = processed_input.input_params;
 
 #if defined(USE_NPU)
@@ -613,14 +618,18 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
 #endif
 
+  XLLM_DLOG(INFO) << "[DIAG-WI] prepare_stream synchronize starting";
   auto ret = prepare_stream_->synchronize();
+  XLLM_DLOG(INFO) << "[DIAG-WI] prepare_stream synchronize done, ret=" << ret;
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
     const ForwardInput& input) {
+  XLLM_DLOG(INFO) << "[DIAG-WI] step_async entered";
   ForwardInput input_on_device;
 
   prepare_work_before_execute(input, input_on_device);
+  XLLM_DLOG(INFO) << "[DIAG-WI] prepare_work_before_execute completed, scheduling step";
 
   folly::Promise<std::optional<ForwardOutput>> promise;
   auto future = promise.getSemiFuture();

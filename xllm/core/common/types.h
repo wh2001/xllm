@@ -207,6 +207,7 @@ struct WeightSegment {
 
 struct InstanceInfo {
   std::string name = "";
+  std::string model_id = "";
   std::string rpc_address = "";
   std::string incarnation_id = "";
   uint64_t register_ts_ms = 0;
@@ -217,14 +218,19 @@ struct InstanceInfo {
   std::vector<std::string> addrs;
   std::vector<int64_t> k_cache_ids;
   std::vector<int64_t> v_cache_ids;
-  int32_t dp_size;
+  int32_t dp_size = 0;
   // device network info
   std::vector<std::string> device_ips;
   std::vector<uint16_t> ports;
-  // ttft profiling data
-  std::vector<std::pair<int32_t, double>> ttft_profiling_data;
-  // tpot profiling data
-  std::vector<std::tuple<int32_t, int32_t, double>> tpot_profiling_data;
+  // P2P addresses for mooncake transfer engine (format: "IP:port")
+  std::vector<std::string> p2p_addrs;
+  // ttft profiling data per model: model_id -> profiling_data
+  std::unordered_map<std::string, std::vector<std::pair<int32_t, double>>>
+      ttft_profiling_data;
+  // tpot profiling data per model: model_id -> profiling_data
+  std::unordered_map<std::string,
+                     std::vector<std::tuple<int32_t, int32_t, double>>>
+      tpot_profiling_data;
 
   // XTensor mode: per-worker free physical pages
   std::vector<size_t> worker_free_phy_pages;
@@ -236,9 +242,12 @@ struct InstanceInfo {
   std::unordered_map<std::string, std::vector<WeightSegment>>
       model_weight_segments;
 
+  bool enable_disagg_pd = false;
+
   nlohmann::json serialize_to_json() const {
     nlohmann::json json_val;
     json_val["name"] = name;
+    json_val["model_id"] = model_id;
     json_val["rpc_address"] = rpc_address;
     json_val["incarnation_id"] = incarnation_id;
     json_val["register_ts_ms"] = register_ts_ms;
@@ -261,8 +270,19 @@ struct InstanceInfo {
     json_val["dp_size"] = dp_size;
     json_val["device_ips"] = device_ips;
     json_val["ports"] = ports;
-    json_val["ttft_profiling_data"] = ttft_profiling_data;
-    json_val["tpot_profiling_data"] = tpot_profiling_data;
+    json_val["p2p_addrs"] = p2p_addrs;
+    // Serialize ttft_profiling_data as object with model_id keys
+    nlohmann::json ttft_json;
+    for (const auto& [model_id, data] : ttft_profiling_data) {
+      ttft_json[model_id] = data;
+    }
+    json_val["ttft_profiling_data"] = ttft_json;
+    // Serialize tpot_profiling_data as object with model_id keys
+    nlohmann::json tpot_json;
+    for (const auto& [model_id, data] : tpot_profiling_data) {
+      tpot_json[model_id] = data;
+    }
+    json_val["tpot_profiling_data"] = tpot_json;
     // XTensor mode info
     json_val["worker_free_phy_pages"] = worker_free_phy_pages;
     json_val["total_phy_pages"] = total_phy_pages;
@@ -276,6 +296,7 @@ struct InstanceInfo {
       segments_json[model_id] = seg_array;
     }
     json_val["model_weight_segments"] = segments_json;
+    json_val["enable_disagg_pd"] = enable_disagg_pd;
     return json_val;
   }
 };

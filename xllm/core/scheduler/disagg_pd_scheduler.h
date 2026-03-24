@@ -97,19 +97,16 @@ class DisaggPDScheduler : public ContinuousScheduler {
                        const int32_t dp_size);
 
  protected:
-  // Pre-execute prefill requests of different lengths at startup and obtain the
-  // corresponding TTFT for calculating the estimated TTFT of requests.
-  void profile_ttft();
-
-  void profile_tpot();
-
   // check remote instance info, if not exist, get from master service
   bool check_remote_instance_info(const std::string& instance_name);
+
+  void post_register_link() override {}
 
   // create rpc channel to remote instance,
   // we can get remote instance info from master service.
   proto::DisaggPDService_Stub* create_rpc_channel(
-      const std::string& instance_name);
+      const std::string& instance_name,
+      const std::string& decode_rpc_address = "");
 
   virtual void start_rpc_server();
 

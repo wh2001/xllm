@@ -126,10 +126,15 @@ inline size_t get_instance_info_size(const InstanceInfo& info) {
 
   size += type_size<uint64_t> + info.k_cache_ids.size() * type_size<int64_t> +
           type_size<uint64_t> + info.v_cache_ids.size() * type_size<int64_t> +
-          type_size<int32_t>  // dp_size
-          + type_size<uint64_t> +
-          info.ttft_profiling_data.size() *
-              (type_size<int32_t> + type_size<int64_t>);
+          type_size<int32_t>;  // dp_size
+
+  // ttft_profiling_data: map<string, vector<pair<int32_t, double>>>
+  size += type_size<uint64_t>;  // num_models
+  for (const auto& [model_id, data] : info.ttft_profiling_data) {
+    size += get_string_size(model_id);
+    size += type_size<uint64_t> +
+            data.size() * (type_size<int32_t> + type_size<double>);
+  }
 
   return size;
 }
@@ -477,13 +482,18 @@ inline void write_instance_info(char*& buffer, const InstanceInfo& info) {
   write_vector(buffer, info.v_cache_ids);
   write_data(buffer, info.dp_size);
 
-  const uint64_t prof_size = info.ttft_profiling_data.size();
-  write_data(buffer, prof_size);
-  if (prof_size > 0) {
-    std::memcpy(buffer,
-                info.ttft_profiling_data.data(),
-                prof_size * sizeof(std::pair<int32_t, int64_t>));
-    buffer += prof_size * sizeof(std::pair<int32_t, int64_t>);
+  // Write ttft_profiling_data: map<string, vector<pair<int32_t, double>>>
+  const uint64_t num_models = info.ttft_profiling_data.size();
+  write_data(buffer, num_models);
+  for (const auto& [model_id, data] : info.ttft_profiling_data) {
+    write_string(buffer, model_id);
+    const uint64_t prof_size = data.size();
+    write_data(buffer, prof_size);
+    if (prof_size > 0) {
+      std::memcpy(buffer, data.data(),
+                  prof_size * sizeof(std::pair<int32_t, double>));
+      buffer += prof_size * sizeof(std::pair<int32_t, double>);
+    }
   }
 }
 
@@ -863,14 +873,21 @@ inline void read_instance_info(const char*& buffer, InstanceInfo& info) {
   read_vector(buffer, info.v_cache_ids);
   read_data(buffer, info.dp_size);
 
-  uint64_t prof_size;
-  read_data(buffer, prof_size);
-  info.ttft_profiling_data.resize(prof_size);
-  if (prof_size > 0) {
-    std::memcpy(info.ttft_profiling_data.data(),
-                buffer,
-                prof_size * sizeof(std::pair<int32_t, int64_t>));
-    buffer += prof_size * sizeof(std::pair<int32_t, int64_t>);
+  // Read ttft_profiling_data: map<string, vector<pair<int32_t, double>>>
+  uint64_t num_models;
+  read_data(buffer, num_models);
+  for (uint64_t i = 0; i < num_models; ++i) {
+    std::string model_id;
+    read_string(buffer, model_id);
+    uint64_t prof_size;
+    read_data(buffer, prof_size);
+    std::vector<std::pair<int32_t, double>> data(prof_size);
+    if (prof_size > 0) {
+      std::memcpy(data.data(), buffer,
+                  prof_size * sizeof(std::pair<int32_t, double>));
+      buffer += prof_size * sizeof(std::pair<int32_t, double>);
+    }
+    info.ttft_profiling_data[model_id] = std::move(data);
   }
 }
 

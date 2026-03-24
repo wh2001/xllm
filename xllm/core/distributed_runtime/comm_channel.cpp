@@ -131,6 +131,21 @@ bool CommChannel::get_device_info(std::string& device_ip, uint16_t& port) {
   return true;
 }
 
+bool CommChannel::get_p2p_addr(std::string& p2p_addr) {
+  proto::Empty req;
+  proto::P2PAddr resp;
+  brpc::Controller cntl;
+
+  stub_->GetP2PAddr(&cntl, &req, &resp, nullptr);
+  if (cntl.Failed()) {
+    LOG(ERROR) << "GetP2PAddr failed: " << cntl.ErrorText();
+    return false;
+  }
+
+  p2p_addr = resp.addr();
+  return true;
+}
+
 bool CommChannel::get_cache_info(uint64_t& cluster_id,
                                  std::string& addr,
                                  int64_t& k_cache_id,
@@ -583,18 +598,20 @@ bool CommChannel::get_active_activation_memory_async(
 bool CommChannel::execute_model_with_brpc(
     const RawForwardInput& input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
-  // convert to proto::ForwardInput
+  XLLM_DLOG(INFO) << "[DIAG-CC] execute_model_with_brpc: serializing input";
   proto::ForwardInput pb_forward_input;
   forward_input_to_proto(input, &pb_forward_input);
 
-  // call ExecuteModel with callback
   auto done = new ExecuteModelClosure();
   done->promise = std::move(promise);
+  XLLM_DLOG(INFO) << "[DIAG-CC] execute_model_with_brpc: issuing async brpc call";
   stub_->ExecuteModel(&done->cntl, &pb_forward_input, &done->pb_output, done);
+  XLLM_DLOG(INFO) << "[DIAG-CC] execute_model_with_brpc: async brpc call dispatched";
   return true;
 }
 
 void ExecuteModelClosure::Run() {
+  XLLM_DLOG(INFO) << "[DIAG-CC] ExecuteModelClosure::Run() entered";
   std::unique_ptr<ExecuteModelClosure> self_guard(this);
 
   if (cntl.Failed()) {
@@ -604,6 +621,7 @@ void ExecuteModelClosure::Run() {
 
   RawForwardOutput raw_forward_output;
   proto_to_forward_output(pb_output, raw_forward_output);
+  XLLM_DLOG(INFO) << "[DIAG-CC] ExecuteModelClosure::Run() setting promise value";
   promise.setValue(raw_forward_output);
 
   return;
