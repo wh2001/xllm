@@ -34,97 +34,103 @@ XllmServer::~XllmServer() {
 }
 
 bool XllmServer::start(std::unique_ptr<APIService> service) {
-  server_ = std::make_unique<brpc::Server>();
-  if (FLAGS_node_rank == 0) {
-    if (server_->AddService(service.get(),
-                            brpc::SERVER_DOESNT_OWN_SERVICE,
-                            "v1/completions => CompletionsHttp,"
-                            "v1/sample => SampleHttp,"
-                            "v1/chat/completions => ChatCompletionsHttp,"
-                            "v1/embeddings => EmbeddingsHttp,"
-                            "v1/models => ModelsHttp,"
-                            "v1/image/generation => ImageGenerationHttp,"
-                            "v1/rerank => RerankHttp,"
-                            "v1/messages => AnthropicMessagesHttp,"
-                            "v2/repository/index => ModelVersionsHttp,"
-                            "fork_master => ForkMasterHttp,"
-                            "sleep => SleepHttp,"
-                            "wakeup => WakeupHttp,"
-                            "link_d2d => LinkD2DHttp,"
-                            "unlink_d2d => UnlinkD2DHttp,"
-                            "resize => ResizeHttp") != 0) {
-      LOG(ERROR) << "Fail to add api service";
-      return false;
+  const int kMaxRetries = 5;
+  const int kRetryIntervalSec = 1;
+
+  for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
+    server_ = std::make_unique<brpc::Server>();
+    if (FLAGS_node_rank == 0) {
+      if (server_->AddService(service.get(),
+                              brpc::SERVER_DOESNT_OWN_SERVICE,
+                              "v1/completions => CompletionsHttp,"
+                              "v1/sample => SampleHttp,"
+                              "v1/chat/completions => ChatCompletionsHttp,"
+                              "v1/embeddings => EmbeddingsHttp,"
+                              "v1/models => ModelsHttp,"
+                              "v1/image/generation => ImageGenerationHttp,"
+                              "v1/rerank => RerankHttp,"
+                              "v1/messages => AnthropicMessagesHttp,"
+                              "v2/repository/index => ModelVersionsHttp,"
+                              "fork_master => ForkMasterHttp,"
+                              "sleep => SleepHttp,"
+                              "wakeup => WakeupHttp,"
+                              "link_d2d => LinkD2DHttp,"
+                              "unlink_d2d => UnlinkD2DHttp,"
+                              "resize => ResizeHttp") != 0) {
+        LOG(ERROR) << "Fail to add api service";
+        return false;
+      }
+    } else if (FLAGS_enable_xtensor) {
+      if (server_->AddService(service.get(),
+                              brpc::SERVER_DOESNT_OWN_SERVICE,
+                              "fork_master => ForkMasterHttp") != 0) {
+        LOG(ERROR) << "Fail to add api service";
+        return false;
+      }
     }
-  } else if (FLAGS_enable_xtensor) {
-    if (server_->AddService(service.get(),
-                            brpc::SERVER_DOESNT_OWN_SERVICE,
-                            "fork_master => ForkMasterHttp") != 0) {
-      LOG(ERROR) << "Fail to add api service";
-      return false;
+
+    brpc::ServerOptions options;
+    options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
+    options.num_threads = FLAGS_num_threads;
+    options.health_reporter = &HealthReporter::instance();
+    if (server_->Start(FLAGS_port, &options) == 0) {
+      LOG(INFO) << "Brpc Server started on port " << FLAGS_port
+                << ", idle_timeout_s: " << FLAGS_rpc_idle_timeout_s
+                << ", num_threads: " << FLAGS_num_threads;
+
+      listen_address_ =
+          std::string(butil::endpoint2str(server_->listen_address()).c_str());
+      listen_port_ = FLAGS_port;
+      has_initialized_ = true;
+      server_->RunUntilAskedToQuit();
+      return true;
+    }
+
+    if (attempt < kMaxRetries - 1) {
+      LOG(WARNING) << "Port " << FLAGS_port << " unavailable, retrying in "
+                   << kRetryIntervalSec << "s (" << (attempt + 1) << "/"
+                   << kMaxRetries << ")";
+      sleep(kRetryIntervalSec);
     }
   }
 
-  brpc::ServerOptions options;
-  // TODO: enable arean message factory later.
-  // options.rpc_pb_message_factory =
-  //    brpc::GetArenaRpcPBMessageFactory<1024 * 1024, 1024 * 1024 * 128>();
-  options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
-  options.num_threads = FLAGS_num_threads;
-  // Use custom health reporter for /health endpoint
-  options.health_reporter = &HealthReporter::instance();
-  if (server_->Start(FLAGS_port, &options) != 0) {
-    LOG(ERROR) << "Failed to start server on port " << FLAGS_port;
-    return false;
-  }
-  LOG(INFO) << "Brpc Server started on port " << FLAGS_port
-            << ", idle_timeout_s: " << FLAGS_rpc_idle_timeout_s
-            << ", num_threads: " << FLAGS_num_threads;
-
-  listen_address_ =
-      std::string(butil::endpoint2str(server_->listen_address()).c_str());
-  listen_port_ = FLAGS_port;
-  has_initialized_ = true;
-  // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
-  server_->RunUntilAskedToQuit();
-
-  return true;
+  LOG(ERROR) << "Failed to start server on port " << FLAGS_port << " after "
+             << kMaxRetries << " attempts";
+  return false;
 }
 
 bool XllmServer::start(std::unique_ptr<DisaggPDService> service,
-                       uint16_t disagg_pd_port) {
-  std::string addr("");
+                       uint16_t /*disagg_pd_port*/) {
+  std::string addr;
   if (!FLAGS_host.empty()) {
-    addr = FLAGS_host + ":" + std::to_string(disagg_pd_port);
+    addr = FLAGS_host + ":0";
   }
   if (!create_server((google::protobuf::Service*)(service.get()),
                      addr,
-                     disagg_pd_port,
+                     0,
                      "Disagg PD")) {
     return false;
   }
 
   has_initialized_ = true;
-  // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
   server_->Join();
   return true;
 }
 
 bool XllmServer::start(std::unique_ptr<PDOOCService> service,
-                       uint16_t disagg_pd_port) {
-  std::string addr("");
+                       uint16_t /*disagg_pd_port*/) {
+  std::string addr;
   if (!FLAGS_host.empty()) {
-    addr = FLAGS_host + ":" + std::to_string(disagg_pd_port);
+    addr = FLAGS_host + ":0";
   }
   if (!create_server((google::protobuf::Service*)(service.get()),
                      addr,
-                     disagg_pd_port,
+                     0,
                      "PD OOC")) {
     return false;
   }
 
   has_initialized_ = true;
-  // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
   server_->Join();
   return true;
 }
@@ -132,18 +138,30 @@ bool XllmServer::start(std::unique_ptr<PDOOCService> service,
 bool XllmServer::start(std::shared_ptr<CollectiveService> service,
                        const std::string& addr,
                        const std::string& server_name) {
-  if (!create_server(
-          (google::protobuf::Service*)(service.get()), addr, -1, server_name)) {
-    return false;
+  const int kMaxRetries = 10;
+  const int kRetryIntervalSec = 1;
+
+  for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
+    if (create_server((google::protobuf::Service*)(service.get()),
+                      addr,
+                      -1,
+                      server_name)) {
+      running_thread_ = std::make_unique<std::thread>(
+          [this, service = std::move(service)]() {
+            has_initialized_ = true;
+            server_->Join();
+          });
+      return true;
+    }
+    if (attempt < kMaxRetries - 1) {
+      LOG(WARNING) << server_name << " failed to bind " << addr
+                   << ", retrying " << (attempt + 1) << "/" << kMaxRetries;
+      sleep(kRetryIntervalSec);
+    }
   }
-
-  running_thread_ =
-      std::make_unique<std::thread>([this, service = std::move(service)]() {
-        has_initialized_ = true;
-        server_->Join();
-      });
-
-  return true;
+  LOG(ERROR) << server_name << " failed to bind " << addr << " after "
+             << kMaxRetries << " retries";
+  return false;
 }
 
 bool XllmServer::start(std::shared_ptr<WorkerService> service,
@@ -213,25 +231,24 @@ bool XllmServer::create_server(google::protobuf::Service* service,
   options.num_threads = FLAGS_num_threads;
   butil::EndPoint endpoint;
   if (!addr.empty()) {
-    listen_address_ = addr;
-    if (butil::str2endpoint(listen_address_.c_str(), &endpoint) < 0) {
-      LOG(FATAL) << "Convert listen_address_ to endpoint failed: "
-                 << listen_address_;
+    if (butil::str2endpoint(addr.c_str(), &endpoint) < 0) {
+      LOG(FATAL) << "Convert address to endpoint failed: " << addr;
       return false;
     }
   } else {
     endpoint = butil::EndPoint(butil::IP_ANY, port);
-    listen_address_ =
-        std::string(butil::endpoint2str(server_->listen_address()).c_str());
   }
-  listen_port_ = port > 0 ? port : server_->listen_address().port;
 
   if (server_->Start(endpoint, &options) != 0) {
     LOG(ERROR) << "Failed to start " << server_name
                << " server on address: " << endpoint;
     return false;
   }
-  LOG(INFO) << server_name << " server started on address " << endpoint
+  listen_address_ =
+      std::string(butil::endpoint2str(server_->listen_address()).c_str());
+  listen_port_ = server_->listen_address().port;
+  LOG(INFO) << server_name << " server started on address "
+            << server_->listen_address()
             << ", idle_timeout_sec: " << FLAGS_rpc_idle_timeout_s
             << ", num_threads: " << FLAGS_num_threads;
 

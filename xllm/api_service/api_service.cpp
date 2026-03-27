@@ -858,14 +858,18 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
     return false;
   }
 
-  std::filesystem::path model_path =
-      std::filesystem::path(request->model_path()).lexically_normal();
   std::string model_id;
-  if (model_path.has_filename()) {
-    model_id = std::filesystem::path(request->model_path()).filename();
+  if (!request->model_id().empty()) {
+    model_id = request->model_id();
   } else {
-    model_id =
-        std::filesystem::path(request->model_path()).parent_path().filename();
+    std::filesystem::path model_path =
+        std::filesystem::path(request->model_path()).lexically_normal();
+    if (model_path.has_filename()) {
+      model_id = std::filesystem::path(request->model_path()).filename();
+    } else {
+      model_id =
+          std::filesystem::path(request->model_path()).parent_path().filename();
+    }
   }
   options.model_id() = model_id;
   options.master_node_addr() = request->master_node_addr();

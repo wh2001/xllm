@@ -252,6 +252,9 @@ void AsyncResponseProcessor::process_stream_request(
         if (seq_output.has_value()) {
           req_output.outputs.push_back(std::move(seq_output.value()));
         }
+        if (seq->num_generated_tokens() == 1) {
+          req_output.finished_on_prefill_instance = true;
+        }
       }
       bool should_continue = true;
       if (request->state().output_func) {
@@ -337,12 +340,13 @@ void AsyncResponseProcessor::batch_process_stream_requests(
         auto seq_output = seq->generate_streaming_output(size, *tokenizer_);
         if (seq_output.has_value()) {
           req_output->outputs.push_back(std::move(seq_output.value()));
-          if (seq->num_generated_tokens() == 1) {
-            // currently only support one sequence when enable_service_routing
-            // IMPROVE LATER: support enable_schedule_overlap in Default mode
-            // for stream request
-            req_output->finished_on_prefill_instance = true;
-          }
+        }
+        // Set finished_on_prefill_instance regardless of whether
+        // generate_streaming_output produced text, so that the batch
+        // callback always decrements the rate limiter for prefill-done
+        // requests.
+        if (seq->num_generated_tokens() == 1) {
+          req_output->finished_on_prefill_instance = true;
         }
       }
       counter->decrement_count();
@@ -410,16 +414,30 @@ void AsyncResponseProcessor::process_stream_requests(
 
 // for batch generate, wait all response done.
 void AsyncResponseProcessor::wait_completion() {
-  size_t thread_num = response_threadpool_.size();
-  // Add a task to each thread, and when all tasks are completed, it indicates
-  // that all previously scheduled tasks in the thread pool have finished
-  // executing.
-  BlockingCounter counter(thread_num);
-  for (size_t i = 0; i < thread_num; ++i) {
-    auto runnable = [&counter]() mutable { counter.decrement_count(); };
-    response_threadpool_.schedule_with_tid(std::move(runnable), i);
+  // Step 1: drain response_threadpool_ (output serialization tasks).
+  {
+    size_t thread_num = response_threadpool_.size();
+    BlockingCounter counter(thread_num);
+    for (size_t i = 0; i < thread_num; ++i) {
+      auto runnable = [&counter]() mutable { counter.decrement_count(); };
+      response_threadpool_.schedule_with_tid(std::move(runnable), i);
+    }
+    counter.wait();
   }
-  counter.wait();
+  // Step 2: drain rpc_threadpool_ so that the batch callback (outputs_func)
+  // has finished executing before the caller clears the callbacks.  Without
+  // this, prefill_send_first_generation can null-out outputs_func/output_func
+  // while the rpc_threadpool_ task still needs them, causing a rate-limiter
+  // leak (the decrease_requests call is skipped).
+  {
+    size_t thread_num = rpc_threadpool_.size();
+    BlockingCounter counter(thread_num);
+    for (size_t i = 0; i < thread_num; ++i) {
+      auto runnable = [&counter]() mutable { counter.decrement_count(); };
+      rpc_threadpool_.schedule_with_tid(std::move(runnable), i);
+    }
+    counter.wait();
+  }
 }
 
 }  // namespace xllm

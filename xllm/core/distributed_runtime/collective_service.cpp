@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <brpc/closure_guard.h>
 #include <glog/logging.h>
+#include <unistd.h>
 
 #include <vector>
 
@@ -27,14 +28,27 @@ CollectiveService::CollectiveService(int dp_group_num,
                                      int device_idx)
     : total_num_(total_num) {
 #if defined(USE_NPU)
+  constexpr int kHcclMaxRetries = 10;
+  constexpr int kHcclRetrySec = 4;
+
   root_infos_.reserve(dp_group_num + 1);
   for (size_t i = 0; i < (dp_group_num + 1); ++i) {
     HcclRootInfo root_info;
     auto error = aclrtSetDevice(device_idx);
     CHECK_EQ(error, ACL_SUCCESS)
         << "ACL set device id " << device_idx << " failed. Error : " << error;
-    auto status = HcclGetRootInfo(&root_info);
-    CHECK_EQ(status, HCCL_SUCCESS) << "HCCL get root info failed.";
+    HcclResult status = HCCL_SUCCESS;
+    for (int attempt = 0; attempt < kHcclMaxRetries; ++attempt) {
+      status = HcclGetRootInfo(&root_info);
+      if (status == HCCL_SUCCESS) break;
+      LOG(WARNING) << "HcclGetRootInfo failed on device " << device_idx
+                   << " (error=" << status << "), retrying " << (attempt + 1)
+                   << "/" << kHcclMaxRetries;
+      sleep(kHcclRetrySec);
+    }
+    CHECK_EQ(status, HCCL_SUCCESS)
+        << "HCCL get root info failed on device " << device_idx
+        << " after " << kHcclMaxRetries << " retries.";
     root_infos_.push_back(root_info);
   }
 #endif

@@ -19,6 +19,10 @@ limitations under the License.
 #include <pybind11/embed.h>
 #include <torch/torch.h>
 
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <csignal>
 #include <filesystem>
 #include <memory>
@@ -371,6 +375,32 @@ int run() {
     LOG(INFO) << "XTensor initialized with " << num_pages << " physical pages";
   }
 
+  // Pre-bind the API port before any network activity to prevent the kernel
+  // from assigning it as an ephemeral source port for outgoing connections
+  // created during master initialization (WorkerService, CollectiveService,
+  // xservice heartbeat, mooncake sessions, etc.).
+  int reserved_port_fd = -1;
+  if (FLAGS_node_rank == 0 || FLAGS_enable_xtensor) {
+    reserved_port_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (reserved_port_fd >= 0) {
+      int opt = 1;
+      ::setsockopt(
+          reserved_port_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+      struct sockaddr_in bind_addr = {};
+      bind_addr.sin_family = AF_INET;
+      bind_addr.sin_addr.s_addr = INADDR_ANY;
+      bind_addr.sin_port = htons(FLAGS_port);
+      if (::bind(reserved_port_fd,
+                 (struct sockaddr*)&bind_addr,
+                 sizeof(bind_addr)) < 0) {
+        LOG(WARNING) << "Failed to pre-reserve API port " << FLAGS_port
+                     << ": " << strerror(errno);
+        ::close(reserved_port_fd);
+        reserved_port_fd = -1;
+      }
+    }
+  }
+
   std::unique_ptr<Master> master;
   // working node
   if (options.node_rank() != 0) {
@@ -395,6 +425,14 @@ int run() {
   std::vector<std::string> model_versions = {model_version};
 
   if (FLAGS_node_rank == 0 || FLAGS_enable_xtensor) {
+    // Release the pre-reserved port right before brpc binds it;
+    // SO_REUSEADDR on both our socket and brpc's socket eliminates
+    // the race between close() and brpc's bind().
+    if (reserved_port_fd >= 0) {
+      ::close(reserved_port_fd);
+      reserved_port_fd = -1;
+    }
+
     auto api_service =
         std::make_unique<APIService>(master.get(), model_names, model_versions);
     auto xllm_server =

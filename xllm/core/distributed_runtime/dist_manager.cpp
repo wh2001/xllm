@@ -267,8 +267,9 @@ void DistManager::setup_multi_node_workers(
         ServerRegistry::get_instance().register_server(server_name_);
     if (!collective_server->start(
             collective_service, master_node_addr, server_name_)) {
-      LOG(ERROR) << "failed to start collective server on address: "
-                 << master_node_addr;
+      LOG(FATAL) << "Failed to start collective server on address: "
+                 << master_node_addr
+                 << ". Cannot proceed without distributed runtime.";
       return;
     }
 
