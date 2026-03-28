@@ -47,8 +47,8 @@ CollectiveService::CollectiveService(int dp_group_num,
       sleep(kHcclRetrySec);
     }
     CHECK_EQ(status, HCCL_SUCCESS)
-        << "HCCL get root info failed on device " << device_idx
-        << " after " << kHcclMaxRetries << " retries.";
+        << "HCCL get root info failed on device " << device_idx << " after "
+        << kHcclMaxRetries << " retries.";
     root_infos_.push_back(root_info);
   }
 #endif

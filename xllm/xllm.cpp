@@ -13,14 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <arpa/inet.h>
 #include <folly/init/Init.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <pybind11/embed.h>
-#include <torch/torch.h>
-
-#include <arpa/inet.h>
 #include <sys/socket.h>
+#include <torch/torch.h>
 #include <unistd.h>
 
 #include <csignal>
@@ -393,8 +392,8 @@ int run() {
       if (::bind(reserved_port_fd,
                  (struct sockaddr*)&bind_addr,
                  sizeof(bind_addr)) < 0) {
-        LOG(WARNING) << "Failed to pre-reserve API port " << FLAGS_port
-                     << ": " << strerror(errno);
+        LOG(WARNING) << "Failed to pre-reserve API port " << FLAGS_port << ": "
+                     << strerror(errno);
         ::close(reserved_port_fd);
         reserved_port_fd = -1;
       }

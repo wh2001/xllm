@@ -105,10 +105,8 @@ bool XllmServer::start(std::unique_ptr<DisaggPDService> service,
   if (!FLAGS_host.empty()) {
     addr = FLAGS_host + ":0";
   }
-  if (!create_server((google::protobuf::Service*)(service.get()),
-                     addr,
-                     0,
-                     "Disagg PD")) {
+  if (!create_server(
+          (google::protobuf::Service*)(service.get()), addr, 0, "Disagg PD")) {
     return false;
   }
 
@@ -123,10 +121,8 @@ bool XllmServer::start(std::unique_ptr<PDOOCService> service,
   if (!FLAGS_host.empty()) {
     addr = FLAGS_host + ":0";
   }
-  if (!create_server((google::protobuf::Service*)(service.get()),
-                     addr,
-                     0,
-                     "PD OOC")) {
+  if (!create_server(
+          (google::protobuf::Service*)(service.get()), addr, 0, "PD OOC")) {
     return false;
   }
 
@@ -146,16 +142,16 @@ bool XllmServer::start(std::shared_ptr<CollectiveService> service,
                       addr,
                       -1,
                       server_name)) {
-      running_thread_ = std::make_unique<std::thread>(
-          [this, service = std::move(service)]() {
+      running_thread_ =
+          std::make_unique<std::thread>([this, service = std::move(service)]() {
             has_initialized_ = true;
             server_->Join();
           });
       return true;
     }
     if (attempt < kMaxRetries - 1) {
-      LOG(WARNING) << server_name << " failed to bind " << addr
-                   << ", retrying " << (attempt + 1) << "/" << kMaxRetries;
+      LOG(WARNING) << server_name << " failed to bind " << addr << ", retrying "
+                   << (attempt + 1) << "/" << kMaxRetries;
       sleep(kRetryIntervalSec);
     }
   }
