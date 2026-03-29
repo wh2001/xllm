@@ -51,6 +51,7 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
                               "v1/rerank => RerankHttp,"
                               "v1/messages => AnthropicMessagesHttp,"
                               "v2/repository/index => ModelVersionsHttp,"
+                              "get_free_port => GetFreePortHttp,"
                               "fork_master => ForkMasterHttp,"
                               "sleep => SleepHttp,"
                               "wakeup => WakeupHttp,"
@@ -63,6 +64,7 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
     } else if (FLAGS_enable_xtensor) {
       if (server_->AddService(service.get(),
                               brpc::SERVER_DOESNT_OWN_SERVICE,
+                              "get_free_port => GetFreePortHttp,"
                               "fork_master => ForkMasterHttp") != 0) {
         LOG(ERROR) << "Fail to add api service";
         return false;
@@ -134,7 +136,10 @@ bool XllmServer::start(std::unique_ptr<PDOOCService> service,
 bool XllmServer::start(std::shared_ptr<CollectiveService> service,
                        const std::string& addr,
                        const std::string& server_name) {
-  const int kMaxRetries = 10;
+  // Port 0 = OS-assigned: retries get a new port each time, so retrying helps.
+  // Fixed port: retrying the same port is pointless (conflict won't self-heal).
+  const bool is_ephemeral = (addr.size() > 2 && addr.substr(addr.size() - 2) == ":0");
+  const int kMaxRetries = is_ephemeral ? 3 : 1;
   const int kRetryIntervalSec = 1;
 
   for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
@@ -150,13 +155,13 @@ bool XllmServer::start(std::shared_ptr<CollectiveService> service,
       return true;
     }
     if (attempt < kMaxRetries - 1) {
-      LOG(WARNING) << server_name << " failed to bind " << addr << ", retrying "
-                   << (attempt + 1) << "/" << kMaxRetries;
+      LOG(WARNING) << server_name << " failed to bind " << addr
+                   << ", retrying " << (attempt + 1) << "/" << kMaxRetries;
       sleep(kRetryIntervalSec);
     }
   }
   LOG(ERROR) << server_name << " failed to bind " << addr << " after "
-             << kMaxRetries << " retries";
+             << kMaxRetries << " attempts";
   return false;
 }
 

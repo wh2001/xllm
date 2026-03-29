@@ -19,6 +19,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <unistd.h>
 
+#include <stdexcept>
 #include <vector>
 
 namespace xllm {
@@ -71,13 +72,23 @@ void CollectiveService::Sync(::google::protobuf::RpcController* controller,
 #endif
 }
 
-std::unordered_map<int32_t, std::string> CollectiveService::wait() {
+std::unordered_map<int32_t, std::string> CollectiveService::wait(
+    int timeout_sec) {
   int connected = 0;
+  int elapsed_sec = 0;
   while (connected < total_num_) {
     absl::SleepFor(absl::Milliseconds(1000));
+    ++elapsed_sec;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       connected = addrs_map_.size();
+    }
+    if (timeout_sec > 0 && elapsed_sec >= timeout_sec) {
+      throw std::runtime_error(
+          "CollectiveService::wait timed out after " +
+          std::to_string(timeout_sec) + "s: only " +
+          std::to_string(connected) + "/" + std::to_string(total_num_) +
+          " workers connected");
     }
   }
 

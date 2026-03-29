@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <atomic>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -120,6 +121,11 @@ class APIService : public proto::XllmAPIService {
                              proto::HttpResponse* response,
                              ::google::protobuf::Closure* done) override;
 
+  void GetFreePortHttp(::google::protobuf::RpcController* controller,
+                       const proto::HttpRequest* request,
+                       proto::HttpResponse* response,
+                       ::google::protobuf::Closure* done) override;
+
   void ForkMaster(::google::protobuf::RpcController* controller,
                   const proto::MasterInfos* request,
                   proto::Status* response,
@@ -187,8 +193,10 @@ class APIService : public proto::XllmAPIService {
   bool has_model_master(const std::string& model_id) const;
   bool add_model_master_if_absent(const std::string& model_id, Master* master);
   Master* get_model_master(const std::string& model_id) const;
+  void remove_model_master(const std::string& model_id);
 
   Master* master_;
+  std::atomic<bool> initial_master_slept_{false};
   mutable std::shared_mutex masters_mutex_;
   std::unordered_map<std::string, Master*> masters_;
   std::unique_ptr<AnthropicServiceImpl> anthropic_service_impl_;

@@ -45,6 +45,7 @@ class ChatServiceImpl final : public APIServiceImpl<ChatCall> {
   void process_async_rpc_impl(const proto::ChatRequest* request);
 
   void add_model_master(const std::string& model, LLMMaster* master);
+  void remove_model_master(const std::string& model);
 
  private:
   void process_rec_chat_request(std::shared_ptr<ChatCall> call);

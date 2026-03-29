@@ -82,6 +82,8 @@ service XllmAPIService {
 
   rpc AnthropicMessagesHttp (HttpRequest) returns (HttpResponse);
 
+  rpc GetFreePortHttp (HttpRequest) returns (HttpResponse);
+
   rpc ForkMaster (MasterInfos) returns (Status);
   rpc ForkMasterHttp (HttpRequest) returns (HttpResponse);
   

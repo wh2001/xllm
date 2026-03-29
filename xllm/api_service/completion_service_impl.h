@@ -40,6 +40,7 @@ class CompletionServiceImpl final : public APIServiceImpl<CompletionCall> {
   void process_async_rpc_impl(const proto::CompletionRequest* request);
 
   void add_model_master(const std::string& model, LLMMaster* master);
+  void remove_model_master(const std::string& model);
 
  private:
   LLMMaster* get_model_master(const std::string& model) const;

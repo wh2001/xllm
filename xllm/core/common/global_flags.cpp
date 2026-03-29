@@ -495,6 +495,12 @@ DEFINE_bool(
     false,
     "Whether to enable xtensor for model weights with physical page pool.");
 
+DEFINE_bool(
+    sleep_initial_model,
+    false,
+    "Whether to sleep the initial model (loaded via --model) after the first "
+    "fork_master succeeds, freeing its GPU memory.");
+
 // --- rolling load config ---
 
 DEFINE_bool(enable_rolling_load,

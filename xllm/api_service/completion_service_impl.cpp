@@ -174,6 +174,12 @@ void CompletionServiceImpl::add_model_master(const std::string& model,
   models_.insert(model);
 }
 
+void CompletionServiceImpl::remove_model_master(const std::string& model) {
+  std::unique_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);
+  llm_model_to_master_.erase(model);
+  models_.erase(model);
+}
+
 LLMMaster* CompletionServiceImpl::get_model_master(
     const std::string& model) const {
   std::shared_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);

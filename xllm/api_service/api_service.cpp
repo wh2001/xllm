@@ -15,6 +15,10 @@ limitations under the License.
 
 #include "api_service.h"
 
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <glog/logging.h>
 #include <google/protobuf/util/json_util.h>
 #include <json2pb/json_to_pb.h>
@@ -42,6 +46,9 @@ limitations under the License.
 #include "models.pb.h"
 #include "service_impl_factory.h"
 #include "xllm_metrics.h"
+
+DECLARE_bool(sleep_initial_model);
+
 namespace xllm {
 
 namespace {
@@ -140,6 +147,27 @@ Master* APIService::get_model_master(const std::string& model_id) const {
     return nullptr;
   }
   return it->second;
+}
+
+void APIService::remove_model_master(const std::string& model_id) {
+  if (FLAGS_node_rank == 0) {
+    if (completion_service_impl_) {
+      completion_service_impl_->remove_model_master(model_id);
+    }
+    if (chat_service_impl_) {
+      chat_service_impl_->remove_model_master(model_id);
+    }
+  }
+  Master* old_master = nullptr;
+  {
+    std::unique_lock<std::shared_mutex> lock(masters_mutex_);
+    auto it = masters_.find(model_id);
+    if (it != masters_.end()) {
+      old_master = it->second;
+      masters_.erase(it);
+    }
+  }
+  delete old_master;
 }
 
 void APIService::Completions(::google::protobuf::RpcController* controller,
@@ -895,6 +923,41 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
   return true;
 }
 
+void APIService::GetFreePortHttp(
+    ::google::protobuf::RpcController* controller,
+    const proto::HttpRequest* /*request*/,
+    proto::HttpResponse* /*response*/,
+    ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  int port = -1;
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd >= 0) {
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(0);
+    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+      socklen_t len = sizeof(addr);
+      if (getsockname(fd, (struct sockaddr*)&addr, &len) == 0) {
+        port = ntohs(addr.sin_port);
+      }
+    }
+    ::close(fd);
+  }
+
+  ctrl->http_response().set_content_type("application/json");
+  if (port > 0) {
+    ctrl->response_attachment().append(
+        "{\"port\":" + std::to_string(port) + "}");
+  } else {
+    ctrl->http_response().set_status_code(500);
+    ctrl->response_attachment().append("{\"port\":-1}");
+  }
+}
+
 void APIService::ForkMaster(::google::protobuf::RpcController* controller,
                             const proto::MasterInfos* request,
                             proto::Status* response,
@@ -943,14 +1006,26 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
   }
 
   if (has_model_master(master_options.model_id())) {
-    LOG(INFO) << "Master for model " << master_options.model_id()
-              << " already exists";
-    return;
+    Master* existing = get_model_master(master_options.model_id());
+    auto existing_addr =
+        existing ? existing->options().master_node_addr().value_or("") : "";
+    auto new_addr = master_options.master_node_addr().value_or("");
+    if (existing_addr == new_addr || new_addr.empty()) {
+      LOG(INFO) << "Master for model " << master_options.model_id()
+                << " already exists with same address, skip";
+      return;
+    }
+    LOG(WARNING) << "Replacing stale master for model "
+                 << master_options.model_id() << " (old addr: " << existing_addr
+                 << " -> new addr: " << new_addr
+                 << "), likely a TP fork retry with new port";
+    remove_model_master(master_options.model_id());
   }
 
   auto master = fork_master(master_, master_options);
   if (!master) {
     LOG(ERROR) << "Failed to fork master: " << master_options.model_id();
+    ctrl->SetFailed("Failed to fork master for " + master_options.model_id());
     return;
   }
 
@@ -978,6 +1053,20 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
     chat_service_impl_->add_model_master(master_options.model_id(), llm_master);
   }
   master.release();
+
+  if (FLAGS_sleep_initial_model &&
+      !initial_master_slept_.exchange(true) && master_ != nullptr &&
+      !master_->is_sleeping()) {
+    LOG(INFO) << "Sleeping initial master (loaded via --model) to free GPU memory";
+    master_->get_rate_limiter()->try_set_sleeping();
+    master_->set_master_status(MasterStatus(MasterStatus::LIGHT_SLEEP));
+    if (master_->sleep()) {
+      LOG(INFO) << "Initial master slept successfully, GPU memory freed";
+    } else {
+      LOG(WARNING) << "Failed to sleep initial master";
+      initial_master_slept_.store(false);
+    }
+  }
 }
 
 void APIService::Sleep(::google::protobuf::RpcController* controller,

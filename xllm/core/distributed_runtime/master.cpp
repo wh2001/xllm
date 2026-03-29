@@ -398,12 +398,17 @@ std::unique_ptr<Master> fork_master(Master* master, const Options& options) {
     new_options.dp_size() = options.dp_size();
   }
   std::unique_ptr<Master> new_master;
-  if (new_options.node_rank() != 0) {
-    new_master = std::make_unique<LLMAssistantMaster>(new_options);
-  } else {
-    new_master = create_master(new_options.backend(), new_options);
+  try {
+    if (new_options.node_rank() != 0) {
+      new_master = std::make_unique<LLMAssistantMaster>(new_options);
+    } else {
+      new_master = create_master(new_options.backend(), new_options);
+    }
+    new_master->run();
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "fork_master failed: " << e.what();
+    return nullptr;
   }
-  new_master->run();
 
   return new_master;
 }

@@ -16,6 +16,7 @@ limitations under the License.
 #include "distributed_runtime/dist_manager.h"
 
 #include <glog/logging.h>
+#include <stdexcept>
 
 #include "comm_channel.h"
 #include "common/health_check_manager.h"
@@ -219,15 +220,36 @@ void DistManager::setup_multi_node_workers(
   } else {
     LOG(FATAL) << "Unsupported " << model_backend << " in multi-node.";
   }
-  // create local workers
+  // For node_rank==0: start CollectiveServer FIRST so we know its actual
+  // port (OS-assigned) before creating workers that need to connect to it.
+  std::string actual_master_addr = master_node_addr;
+  std::shared_ptr<CollectiveService> collective_service;
+
+  if (options.node_rank() == 0) {
+    auto dp_local_process_group_num =
+        (dp_size > 1 && dp_size < world_size) ? dp_size : 0;
+
+    collective_service = std::make_shared<CollectiveService>(
+        dp_local_process_group_num, world_size, devices[0].index());
+    XllmServer* collective_server =
+        ServerRegistry::get_instance().register_server(server_name_);
+    if (!collective_server->start(
+            collective_service, master_node_addr, server_name_)) {
+      LOG(ERROR) << "Failed to start collective server on address: "
+                 << master_node_addr
+                 << ". Cannot proceed without distributed runtime.";
+      ServerRegistry::get_instance().unregister_server(server_name_);
+      throw std::runtime_error(
+          "CollectiveServer bind failed on " + master_node_addr);
+    }
+    actual_master_addr = collective_server->listen_address();
+    LOG(INFO) << "CollectiveServer actual address: " << actual_master_addr;
+  }
+
+  // create local workers (using the actual CollectiveServer address)
   for (int32_t i = 0; i < each_node_ranks; ++i) {
-    // worldsize = 8
-    // Node1: 0, 1, 2, 3
-    // Node2: 0+4, 1+4, 2+4, 3+4
     const int32_t rank = i + base_rank;
 
-    // we use spawn process worker to launch a xllm instance
-    // when start a offline inference task with multi-gpu/npu/mpu/...
 #if defined(USE_CUDA)
     bool use_spawn_worker = (options.enable_offline_inference() && i > 0) ||
                             force_spawn_for_numa_isolation[i];
@@ -242,8 +264,7 @@ void DistManager::setup_multi_node_workers(
     ParallelArgs parallel_args(rank, world_size, dp_size, nullptr, ep_size);
 
     servers_.emplace_back(std::make_unique<WorkerServer>(i,
-                                                         master_node_addr,
-                                                         // done,
+                                                         actual_master_addr,
                                                          dones[i],
                                                          parallel_args,
                                                          devices[i],
@@ -252,28 +273,27 @@ void DistManager::setup_multi_node_workers(
                                                          use_spawn_worker));
   }
 
-  // Master node need to wait all workers done
+  // Master node: wait for all workers to connect
   if (options.node_rank() == 0) {
-    // if dp_size equals 1, use global process group directly
-    // if dp_size equals world_size, distributed communication is not required
-    auto dp_local_process_group_num =
-        (dp_size > 1 && dp_size < world_size) ? dp_size : 0;
+    // For TP>1 (nnodes>1), use a timeout shorter than xllm-service's
+    // kForkTimeoutMs (120s) so we can clean up and propagate the error
+    // before the client gives up.  For nnodes==1 keep infinite wait.
+    const int wait_timeout_sec = (options.nnodes() > 1) ? 90 : 0;
 
-    // create collective server to sync all workers.
-    std::shared_ptr<CollectiveService> collective_service =
-        std::make_shared<CollectiveService>(
-            dp_local_process_group_num, world_size, devices[0].index());
-    XllmServer* collective_server =
-        ServerRegistry::get_instance().register_server(server_name_);
-    if (!collective_server->start(
-            collective_service, master_node_addr, server_name_)) {
-      LOG(FATAL) << "Failed to start collective server on address: "
-                 << master_node_addr
-                 << ". Cannot proceed without distributed runtime.";
-      return;
+    std::unordered_map<int32_t, std::string> worker_addrs_map;
+    try {
+      worker_addrs_map = collective_service->wait(wait_timeout_sec);
+    } catch (...) {
+      LOG(ERROR) << "Worker connection wait failed for " << server_name_
+                 << ", cleaning up CollectiveServer and workers";
+      servers_.clear();
+      auto* cs = ServerRegistry::get_instance().get_server(server_name_);
+      if (cs) {
+        cs->stop();
+      }
+      ServerRegistry::get_instance().unregister_server(server_name_);
+      throw;
     }
-
-    auto worker_addrs_map = collective_service->wait();
 
     // check if all workers connected
     // and then create worker clients

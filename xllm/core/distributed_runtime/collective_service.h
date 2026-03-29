@@ -37,8 +37,10 @@ class CollectiveService : public proto::Collective {
             proto::CommUniqueIdList* response,
             ::google::protobuf::Closure* done) override;
 
-  // wait all worker connected
-  std::unordered_map<int32_t, std::string> wait();
+  // Wait for all workers to connect.
+  // timeout_sec > 0: throw std::runtime_error if not all connected in time.
+  // timeout_sec == 0: wait indefinitely (legacy behavior).
+  std::unordered_map<int32_t, std::string> wait(int timeout_sec = 0);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CollectiveService);

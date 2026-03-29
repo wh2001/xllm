@@ -468,12 +468,10 @@ bool MooncakeTransferEngine::move_memory_blocks(
 
   TransferStatus status;
   bool completed = false;
-  bool transfer_ok = true;
   while (!completed) {
     s = engine->getBatchTransferStatus(batch_id, status);
     if (!s.ok()) {
       LOG(ERROR) << "getBatchTransferStatus not ok";
-      transfer_ok = false;
       completed = true;
     }
 
@@ -481,11 +479,9 @@ bool MooncakeTransferEngine::move_memory_blocks(
       completed = true;
     } else if (status.s == TransferStatusEnum::FAILED) {
       LOG(ERROR) << "getBatchTransferStatus failed";
-      transfer_ok = false;
       completed = true;
     } else if (status.s == TransferStatusEnum::TIMEOUT) {
       LOG(ERROR) << "Sync data transfer timeout";
-      transfer_ok = false;
       completed = true;
     }
   }
@@ -496,7 +492,7 @@ bool MooncakeTransferEngine::move_memory_blocks(
     return false;
   }
 
-  return transfer_ok;
+  return true;
 }
 
 bool MooncakeTransferEngine::move_memory_by_global_offsets(
@@ -570,12 +566,10 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
 
   TransferStatus status;
   bool completed = false;
-  bool transfer_ok = true;
   while (!completed) {
     s = engine->getBatchTransferStatus(batch_id, status);
     if (!s.ok()) {
       LOG(ERROR) << "getBatchTransferStatus not ok";
-      transfer_ok = false;
       completed = true;
     }
 
@@ -583,11 +577,9 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
       completed = true;
     } else if (status.s == TransferStatusEnum::FAILED) {
       LOG(ERROR) << "getBatchTransferStatus failed";
-      transfer_ok = false;
       completed = true;
     } else if (status.s == TransferStatusEnum::TIMEOUT) {
       LOG(ERROR) << "Sync data transfer timeout";
-      transfer_ok = false;
       completed = true;
     }
   }
@@ -598,7 +590,7 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
     return false;
   }
 
-  return transfer_ok;
+  return true;
 }
 
 bool MooncakeTransferEngine::pull_memory_blocks(
