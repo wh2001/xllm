@@ -114,6 +114,7 @@ LLMMaster::LLMMaster(const Options& options)
       scheduler_->profile_ttft();
       scheduler_->profile_tpot();
     }
+
     auto& instance_info = scheduler_->get_instance_info();
     XServiceClient::get_instance()->register_instance(instance_info);
     // Link to existing peer instances after etcd registration so that

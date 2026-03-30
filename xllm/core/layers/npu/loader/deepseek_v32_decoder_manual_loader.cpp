@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,11 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#include "deepseek_v32_decoder_loader.h"
-
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-
-#include <iostream>
+#include "deepseek_v32_decoder_manual_loader.h"
 
 #include "deepseek_decoder_loader_constants.h"
 
@@ -25,7 +21,7 @@ namespace layer {
 
 using namespace deepseek_v32_decoder_constants;
 
-DeekseekV32DecoderLoader::DeekseekV32DecoderLoader(
+DeepseekV32DecoderManualLoader::DeepseekV32DecoderManualLoader(
     uint64_t weight_count,
     const ModelContext& context,
     int32_t layer_id,
@@ -40,7 +36,7 @@ DeekseekV32DecoderLoader::DeekseekV32DecoderLoader(
     int32_t v_head_dim,
     bool prefill_isBF16,
     bool decode_isBF16)
-    : BaseLoader(weight_count, context),
+    : BaseManualLoader(weight_count, context),
       layer_id_(layer_id),
       prefill_firstKDenseReplace_(prefill_firstKDenseReplace),
       prefill_numOfDeviceExperts_(prefill_numOfDeviceExperts),
@@ -77,20 +73,18 @@ DeekseekV32DecoderLoader::DeekseekV32DecoderLoader(
   initialize_weight_tensors(options);
 }
 
-void DeekseekV32DecoderLoader::initialize_tensors(
+void DeepseekV32DecoderManualLoader::initialize_tensors(
     const torch::TensorOptions& options) {
-  tensor_placeholder_ = torch::zeros({1}).to(options);
+  tensor_placeholder_ = torch::zeros({1}, options.device(torch::kCPU));
   reserve_experts_weights(prefill_numOfDeviceExperts_);
   initialize_device_expert_list(decode_worldSize_, num_experts_per_partition_);
 }
 
-void DeekseekV32DecoderLoader::load_state_dict(const StateDict& state_dict) {
+void DeepseekV32DecoderManualLoader::load_state_dict(
+    const StateDict& state_dict) {
   for (const auto& [name, tensor] : state_dict) {
-    bool is_sharded = false;
-    int index = 0;
-
     if (absl::EndsWith(name, "self_attn.kv_b_proj.weight")) {
-      index = WEIGHT_MAPPING_W8A8.at(name);
+      const int index = WEIGHT_MAPPING_W8A8.at(name);
       set_kv_weight(state_dict, name, index, WEIGHT_SHARD_W8A8.at(index));
       continue;
     }
@@ -113,15 +107,16 @@ void DeekseekV32DecoderLoader::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-void DeekseekV32DecoderLoader::verify_loaded_weights(
+void DeepseekV32DecoderManualLoader::verify_loaded_weights(
     const std::string& prefix) const {
   for (const auto& [index, name] : WEIGHT_MAPPING) {
-    CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
+    CHECK(at_host_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << prefix + name;
   }
 }
 
-int DeekseekV32DecoderLoader::extract_expert_index(const std::string& name) {
+int DeepseekV32DecoderManualLoader::extract_expert_index(
+    const std::string& name) {
   std::string prefix = "experts.";
   size_t pos = name.find(prefix);
   if (pos != std::string::npos) {
@@ -137,7 +132,7 @@ int DeekseekV32DecoderLoader::extract_expert_index(const std::string& name) {
   return -1;
 }
 
-void DeekseekV32DecoderLoader::process_expert_weights(
+void DeepseekV32DecoderManualLoader::process_expert_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
@@ -159,10 +154,10 @@ void DeekseekV32DecoderLoader::process_expert_weights(
   const int safe_end =
       std::min(end_idx, static_cast<int>(device_expert_list_.size()));
 
-  auto it = std::find(device_expert_list_.cbegin() + start_idx,
-                      device_expert_list_.cbegin() + safe_end,
+  auto it = std::find(device_expert_list_.begin() + start_idx,
+                      device_expert_list_.begin() + safe_end,
                       expert_index);
-  const bool in_partition = it != device_expert_list_.cbegin() + safe_end;
+  const bool in_partition = it != device_expert_list_.begin() + safe_end;
 
   // Early return if neither EPLB nor partition needs this expert
   if (!needs_eplb && !in_partition) {
@@ -203,11 +198,11 @@ void DeekseekV32DecoderLoader::process_expert_weights(
   // Step 5: Handle partition case
   if (in_partition) {
     std::vector<size_t> matches_pos;
-    for (auto iter = it; iter != device_expert_list_.cbegin() + safe_end;
+    for (auto iter = it; iter != device_expert_list_.begin() + safe_end;
          ++iter) {
       if (*iter == expert_index) {
         matches_pos.emplace_back(
-            std::distance(device_expert_list_.cbegin(), iter) - start_idx);
+            std::distance(device_expert_list_.begin(), iter) - start_idx);
       }
     }
 
@@ -220,10 +215,10 @@ void DeekseekV32DecoderLoader::process_expert_weights(
   }
 }
 
-void DeekseekV32DecoderLoader::initialize_weight_tensors(
+void DeepseekV32DecoderManualLoader::initialize_weight_tensors(
     const torch::TensorOptions& options) {
   for (int i = 0; i < weight_count_; ++i) {
-    at_weight_tensors_[i] = torch::zeros({1}).to(options);
+    at_host_weight_tensors_[i] = torch::zeros({1}, options.device(torch::kCPU));
   }
 
   if (FLAGS_enable_eplb) {
@@ -234,10 +229,10 @@ void DeekseekV32DecoderLoader::initialize_weight_tensors(
   }
 }
 
-void DeekseekV32DecoderLoader::convert_offsets_to_int8() {
+void DeepseekV32DecoderManualLoader::convert_offsets_to_int8() {
   auto convert_to_int8 = [this](int index) {
-    at_weight_tensors_[index] =
-        at_weight_tensors_[index].to(torch::kInt8).to(device_);
+    at_host_weight_tensors_[index] =
+        at_host_weight_tensors_[index].to(torch::kInt8);
   };
   convert_to_int8(IN_Q_PROJ_A_OFFSET);
   convert_to_int8(IN_Q_PROJ_B_OFFSET);
@@ -245,10 +240,11 @@ void DeekseekV32DecoderLoader::convert_offsets_to_int8() {
   convert_to_int8(IN_ATTENTION_OUT_OFFSET);
 }
 
-void DeekseekV32DecoderLoader::handle_device_specific_bias() {
+void DeepseekV32DecoderManualLoader::handle_device_specific_bias() {
   if (dp_local_tp_rank_ != 0) {
-    torch::Tensor original_tensor = at_weight_tensors_[IN_ATTENTION_OUT_BIAS];
-    at_weight_tensors_[IN_ATTENTION_OUT_BIAS] =
+    torch::Tensor original_tensor =
+        at_host_weight_tensors_[IN_ATTENTION_OUT_BIAS];
+    at_host_weight_tensors_[IN_ATTENTION_OUT_BIAS] =
         torch::zeros(original_tensor.sizes(),
                      torch::TensorOptions()
                          .dtype(original_tensor.dtype())
@@ -256,7 +252,7 @@ void DeekseekV32DecoderLoader::handle_device_specific_bias() {
   }
 }
 
-std::string DeekseekV32DecoderLoader::extract_endswith(
+std::string DeepseekV32DecoderManualLoader::extract_endswith(
     const std::string& input) {
   std::vector<std::string> parts;
   std::stringstream ss(input);
@@ -271,7 +267,7 @@ std::string DeekseekV32DecoderLoader::extract_endswith(
   return result;
 }
 
-torch::Tensor DeekseekV32DecoderLoader::get_sharded_tensor(
+torch::Tensor DeepseekV32DecoderManualLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
     int dim) {
@@ -283,7 +279,7 @@ torch::Tensor DeekseekV32DecoderLoader::get_sharded_tensor(
   }
 }
 
-torch::Tensor DeekseekV32DecoderLoader::get_sharded_tensor(
+torch::Tensor DeepseekV32DecoderManualLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
     int dim,
@@ -297,7 +293,7 @@ torch::Tensor DeekseekV32DecoderLoader::get_sharded_tensor(
   }
 }
 
-int DeekseekV32DecoderLoader::get_mapped_index(
+int DeepseekV32DecoderManualLoader::get_mapped_index(
     const std::string& name,
     const std::unordered_map<std::string, int>& mapping) {
   const auto it = mapping.find(name);
@@ -309,15 +305,15 @@ int DeekseekV32DecoderLoader::get_mapped_index(
   return it->second;
 }
 
-void DeekseekV32DecoderLoader::squeeze_experts_weights() {
+void DeepseekV32DecoderManualLoader::squeeze_experts_weights() {
   for (const auto& index : SQUEEZE_WEIGHT_VEC) {
-    if (at_weight_tensors_[index].dim() > 1) {
-      at_weight_tensors_[index] = at_weight_tensors_[index].squeeze();
+    if (at_host_weight_tensors_[index].dim() > 1) {
+      at_host_weight_tensors_[index] = at_host_weight_tensors_[index].squeeze();
     }
   }
 }
 
-void DeekseekV32DecoderLoader::process_general_weights(
+void DeepseekV32DecoderManualLoader::process_general_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
@@ -333,22 +329,22 @@ void DeekseekV32DecoderLoader::process_general_weights(
                                                WEIGHT_SHARD_W8A8.at(index),
                                                dp_local_tp_rank_,
                                                dp_local_tp_size_)
-                                .to(device_)
-                          : tensor.to(device_);
+                                .to(torch::kCPU)
+                          : tensor.to(torch::kCPU);
 
   correct_tensor_dtype(tmp_tensor, name);
-  at_weight_tensors_[index] = tmp_tensor;
+  at_host_weight_tensors_[index] = tmp_tensor;
   if (absl::StartsWith(name, "self_attn.q_a_proj")) {
     const int index_re = get_mapped_index(name, WEIGHT_MAPPING_W8A8_RECOMPUTE);
-    torch::Tensor tmp_tensor_re = tensor.to(device_);
-    at_weight_tensors_[index_re] = tmp_tensor_re;
+    torch::Tensor tmp_tensor_re = tensor.to(torch::kCPU);
+    at_host_weight_tensors_[index_re] = tmp_tensor_re;
   }
   if (layer_id_ != n_layers_ && absl::StrContains(name, "layernorm.weight")) {
-    at_weight_tensors_[index + 1] = torch::zeros_like(tmp_tensor);
+    at_host_weight_tensors_[index + 1] = torch::zeros_like(tmp_tensor);
   }
 }
 
-void DeekseekV32DecoderLoader::process_mlp_common_weights(
+void DeepseekV32DecoderManualLoader::process_mlp_common_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
@@ -365,87 +361,104 @@ void DeekseekV32DecoderLoader::process_mlp_common_weights(
                                       WEIGHT_SHARD_W8A8.at(index),
                                       dp_local_tp_rank_,
                                       dp_local_tp_size_)
-                       .to(device_)
-                 : tensor.to(device_);
+                       .to(torch::kCPU)
+                 : tensor.to(torch::kCPU);
   if (absl::StrContains(name, "down_proj")) {
-    at_weight_tensors_[index] = tmp_tensor;
+    at_host_weight_tensors_[index] = tmp_tensor;
   } else {
     shared_experts_weights_[name] = tmp_tensor;
   }
 }
 
-void DeekseekV32DecoderLoader::merge_experts_weights() {
+void DeepseekV32DecoderManualLoader::merge_experts_weights() {
   torch::Tensor mlp_gateup_weight =
       merge_experts_weights(experts_weights_["gate_proj.weight"],
                             experts_weights_["up_proj.weight"],
-                            device_,
                             /*transpose=*/true);
-  at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT] =
-      at_npu::native::npu_format_cast(mlp_gateup_weight, 29);
-  // at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT] =
-  //     at_npu::native::npu_format_cast(mlp_gateup_weight, 2).contiguous();
+  at_host_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT] =
+      mlp_gateup_weight.contiguous();
   if (quantize_type_ == "w8a8_dynamic") {
-    at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
+    at_host_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
         merge_experts_weights(experts_weights_["gate_proj.weight_offset"],
-                              experts_weights_["up_proj.weight_offset"],
-                              device_);
-    at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
+                              experts_weights_["up_proj.weight_offset"]);
+    at_host_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
         merge_experts_weights(experts_weights_["gate_proj.weight_scale"],
-                              experts_weights_["up_proj.weight_scale"],
-                              device_);
+                              experts_weights_["up_proj.weight_scale"]);
   }
 
+#if defined(USE_A3)
   torch::Tensor mlp_down_weight =
       merge_experts_weights(experts_weights_["down_proj.weight"],
-                            device_,
                             /*transpose=*/false);
-  at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-      at_npu::native::npu_format_cast(mlp_down_weight, ACL_FORMAT_FRACTAL_NZ)
-          .contiguous();
-
+  at_host_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
+      mlp_down_weight.contiguous();
+#else
+  // TODO: xllm ops's GMM need to support MTP.
+  if (decode_isBF16_ && false) {
+    torch::Tensor mlp_down_weight =
+        merge_experts_weights(experts_weights_["down_proj.weight"],
+                              /*transpose=*/true);
+    at_host_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
+        mlp_down_weight.contiguous();
+  } else {
+    torch::Tensor mlp_down_weight =
+        merge_experts_weights(experts_weights_["down_proj.weight"],
+                              /*transpose=*/false);
+    at_host_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
+        mlp_down_weight.contiguous();
+  }
+#endif
   if (quantize_type_ == "w8a8_dynamic") {
-    at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] = merge_experts_weights(
-        experts_weights_["down_proj.weight_offset"], device_);
-    at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] = merge_experts_weights(
-        experts_weights_["down_proj.weight_scale"], device_);
+    at_host_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] =
+        merge_experts_weights(experts_weights_["down_proj.weight_offset"]);
+    at_host_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
+        merge_experts_weights(experts_weights_["down_proj.weight_scale"]);
   }
 }
 
-torch::Tensor DeekseekV32DecoderLoader::merge_experts_weights(
+torch::Tensor DeepseekV32DecoderManualLoader::merge_experts_weights(
     std::vector<torch::Tensor>& experts,
-    at::Device device,
     bool transpose) {
-  torch::Tensor merged_tensor = torch::stack(experts, 0).to(device);
+  torch::Tensor merged_tensor = torch::stack(experts, 0);
   if (transpose) {
     merged_tensor = merged_tensor.transpose(1, 2);
   }
   merged_tensor = merged_tensor.contiguous();
-  experts.clear();
+  // Reset to initial slot state for next load cycle while releasing tensor
+  // storage referenced by intermediate expert tensors.
+  for (auto& expert : experts) {
+    expert = torch::Tensor();
+  }
   return merged_tensor;
 }
 
-torch::Tensor DeekseekV32DecoderLoader::merge_experts_weights(
+torch::Tensor DeepseekV32DecoderManualLoader::merge_experts_weights(
     std::vector<torch::Tensor>& experts_gate,
     std::vector<torch::Tensor>& experts_up,
-    at::Device device,
     bool transpose) {
   for (size_t i = 0; i < experts_up.size(); ++i) {
     experts_gate[i] = torch::cat({experts_gate[i], experts_up[i]}, 0);
   }
 
-  torch::Tensor merged_tensor = torch::stack(experts_gate, 0).to(device);
+  torch::Tensor merged_tensor = torch::stack(experts_gate, 0);
 
   if (transpose) {
     merged_tensor = merged_tensor.transpose(1, 2);
   }
 
   merged_tensor = merged_tensor.contiguous();
-  experts_gate.clear();
-  experts_up.clear();
+  // Reset to initial slot state for next load cycle while releasing tensor
+  // storage referenced by intermediate expert tensors.
+  for (auto& expert : experts_gate) {
+    expert = torch::Tensor();
+  }
+  for (auto& expert : experts_up) {
+    expert = torch::Tensor();
+  }
   return merged_tensor;
 }
 
-void DeekseekV32DecoderLoader::process_shared_expert_weights(
+void DeepseekV32DecoderManualLoader::process_shared_expert_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
@@ -456,34 +469,35 @@ void DeekseekV32DecoderLoader::process_shared_expert_weights(
     return;
   }
   if (FLAGS_expert_parallel_degree == 2) {
-    tmp_tensor = tensor.to(device_);
+    tmp_tensor = tensor.to(torch::kCPU);
   } else {
     const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
     tmp_tensor = is_sharded ? get_sharded_tensor(
                                   state_dict, name, WEIGHT_SHARD_W8A8.at(index))
-                                  .to(device_)
-                            : tensor.to(device_);
+                                  .to(torch::kCPU)
+                            : tensor.to(torch::kCPU);
   }
   if (absl::StrContains(name, "down_proj")) {
-    at_weight_tensors_[index] = tmp_tensor;
+    at_host_weight_tensors_[index] = tmp_tensor;
   } else {
     shared_experts_weights_[name] = tmp_tensor;
   }
 }
 
-void DeekseekV32DecoderLoader::set_kv_weight(const StateDict& state_dict,
-                                             const std::string& tensor_name,
-                                             int weight_position,
-                                             int dim) {
+void DeepseekV32DecoderManualLoader::set_kv_weight(
+    const StateDict& state_dict,
+    const std::string& tensor_name,
+    int weight_position,
+    int dim) {
   torch::Tensor mutable_tensor;
   if (parallel_args_.world_size() <= 1) {
-    mutable_tensor = state_dict.get_tensor(tensor_name).to(device_);
+    mutable_tensor = state_dict.get_tensor(tensor_name).to(torch::kCPU);
     correct_tensor_dtype(mutable_tensor, tensor_name);
   } else {
     mutable_tensor =
         get_sharded_tensor(
             state_dict, tensor_name, dim, dp_local_tp_rank_, dp_local_tp_size_)
-            .to(device_);
+            .to(torch::kCPU);
     // mutable_tensor = get_sharded_tensor(state_dict, tensor_name, dim);
     correct_tensor_dtype(mutable_tensor, tensor_name);
   }
@@ -499,11 +513,13 @@ void DeekseekV32DecoderLoader::set_kv_weight(const StateDict& state_dict,
           .slice(1, qk_nope_head_dim_, qk_nope_head_dim_ + v_head_dim_)
           .transpose(1, 2)
           .contiguous();
-  at_weight_tensors_[weight_position] = k_b_proj_preprocessed.to(device_);
-  at_weight_tensors_[weight_position + 6] = v_b_proj_preprocessed.to(device_);
+  at_host_weight_tensors_[weight_position] =
+      k_b_proj_preprocessed.to(torch::kCPU);
+  at_host_weight_tensors_[weight_position + 6] =
+      v_b_proj_preprocessed.to(torch::kCPU);
 }
 
-void DeekseekV32DecoderLoader::preprocess_linear_for_rope() {
+void DeepseekV32DecoderManualLoader::preprocess_linear_for_rope() {
   for (const auto& name : LINEAR_FOR_ROPE) {
     if (quantize_type_ == "") {
       if (!absl::EndsWith(name, "weight")) {
@@ -511,19 +527,21 @@ void DeekseekV32DecoderLoader::preprocess_linear_for_rope() {
       }
     }
     int index = WEIGHT_MAPPING_W8A8.at(name);
-    at_weight_tensors_[index] =
-        view_tensor(at_weight_tensors_[index], name, true);
-    at_weight_tensors_[index] = trans_rope_weight(at_weight_tensors_[index]);
-    at_weight_tensors_[index] =
+    at_host_weight_tensors_[index] =
+        view_tensor(at_host_weight_tensors_[index], name, true);
+    at_host_weight_tensors_[index] =
+        trans_rope_weight(at_host_weight_tensors_[index]);
+    at_host_weight_tensors_[index] =
         (!absl::EndsWith(name, "weight"))
-            ? view_tensor(at_weight_tensors_[index], name, false).flatten()
-            : view_tensor(at_weight_tensors_[index], name, false);
+            ? view_tensor(at_host_weight_tensors_[index], name, false).flatten()
+            : view_tensor(at_host_weight_tensors_[index], name, false);
   }
 }
 
-torch::Tensor DeekseekV32DecoderLoader::view_tensor(torch::Tensor weight,
-                                                    const std::string& name,
-                                                    bool pre_view) {
+torch::Tensor DeepseekV32DecoderManualLoader::view_tensor(
+    torch::Tensor weight,
+    const std::string& name,
+    bool pre_view) {
   if (absl::StrContains(name, "q_b_proj")) {
     if (pre_view) {
       return weight
@@ -545,8 +563,9 @@ torch::Tensor DeekseekV32DecoderLoader::view_tensor(torch::Tensor weight,
   return weight;
 }
 
-torch::Tensor DeekseekV32DecoderLoader::trans_rope_weight(
+torch::Tensor DeepseekV32DecoderManualLoader::trans_rope_weight(
     torch::Tensor weight) {
+  auto host_weight = weight.clone();
   int64_t d = weight.size(-2);
   int64_t rope_dim = prefill_qkRopeHeadDim_;
   torch::Tensor weight_1 =
@@ -557,12 +576,12 @@ torch::Tensor DeekseekV32DecoderLoader::trans_rope_weight(
 
   torch::Tensor combined = torch::cat({weight_1, weight_2}, -2);
 
-  weight.slice(-2, d - rope_dim, d).copy_(combined);
+  host_weight.slice(-2, d - rope_dim, d).copy_(combined);
 
-  return weight.contiguous();
+  return host_weight.contiguous();
 }
 
-void DeekseekV32DecoderLoader::initialize_device_expert_list(
+void DeepseekV32DecoderManualLoader::initialize_device_expert_list(
     int num_device,
     int num_device_expert) {
   int32_t num_device_route_expert = num_device_expert;
@@ -579,7 +598,7 @@ void DeekseekV32DecoderLoader::initialize_device_expert_list(
   }
 }
 
-torch::Tensor DeekseekV32DecoderLoader::convert_fp16_to_int64(
+torch::Tensor DeepseekV32DecoderManualLoader::convert_fp16_to_int64(
     const torch::Tensor& fp16_tensor) {
   auto float_tensor = fp16_tensor.to(torch::kFloat32);
   auto int32_tensor = float_tensor.view(torch::kInt32);
@@ -587,9 +606,10 @@ torch::Tensor DeekseekV32DecoderLoader::convert_fp16_to_int64(
   return int64_tensor;
 }
 
-void DeekseekV32DecoderLoader::convert_descaled_weights_to_float() {
+void DeepseekV32DecoderManualLoader::convert_descaled_weights_to_float() {
   auto convert_to_float = [this](int index) {
-    at_weight_tensors_[index] = at_weight_tensors_[index].to(torch::kFloat32);
+    at_host_weight_tensors_[index] =
+        at_host_weight_tensors_[index].to(torch::kFloat32);
   };
   convert_to_float(IN_Q_PROJ_A_DESCALE);
   convert_to_float(IN_Q_PROJ_B_DESCALE);
@@ -597,7 +617,7 @@ void DeekseekV32DecoderLoader::convert_descaled_weights_to_float() {
   convert_to_float(IN_ATTENTION_OUT_DESCALE);
 }
 
-void DeekseekV32DecoderLoader::reserve_experts_weights(
+void DeepseekV32DecoderManualLoader::reserve_experts_weights(
     int num_of_device_experts) {
   experts_weights_.clear();
   std::vector<std::string> weight_names = {
@@ -617,7 +637,7 @@ void DeekseekV32DecoderLoader::reserve_experts_weights(
   }
 }
 
-std::string DeekseekV32DecoderLoader::get_expert_shm_key(
+std::string DeepseekV32DecoderManualLoader::get_expert_shm_key(
     int32_t layer_id,
     int32_t expert_index,
     const std::string& suffix) {
@@ -627,14 +647,12 @@ std::string DeekseekV32DecoderLoader::get_expert_shm_key(
   return shm_key;
 }
 
-void DeekseekV32DecoderLoader::merge_shared_experts_weights() {
+void DeepseekV32DecoderManualLoader::merge_shared_experts_weights() {
   auto merge_and_clear = [this](int index,
                                 torch::Tensor& shared_experts_gate,
                                 torch::Tensor& shared_experts_up) {
-    at_weight_tensors_[index] =
-        torch::cat({shared_experts_gate, shared_experts_up}, 0)
-            .to(device_)
-            .contiguous();
+    at_host_weight_tensors_[index] =
+        torch::cat({shared_experts_gate, shared_experts_up}, 0).contiguous();
     shared_experts_gate = tensor_placeholder_;
     shared_experts_up = tensor_placeholder_;
   };
@@ -669,7 +687,7 @@ void DeekseekV32DecoderLoader::merge_shared_experts_weights() {
   }
 }
 
-void DeekseekV32DecoderLoader::merge_loaded_weights() {
+void DeepseekV32DecoderManualLoader::merge_host_at_weights() {
   if (quantize_type_ == "w8a8_dynamic") {
     if (prefill_isBF16_) {
       convert_descaled_weights_to_float();
@@ -687,93 +705,112 @@ void DeekseekV32DecoderLoader::merge_loaded_weights() {
 
   preprocess_linear_for_rope();
 
-  at_weight_tensors_[IN_Q_PROJ_A_WEIGHT] =
-      torch::cat({at_weight_tensors_[IN_KV_PROJ_WITH_MQA_WEIGHT],
-                  at_weight_tensors_[IN_Q_PROJ_A_WEIGHT]},
+  at_host_weight_tensors_[IN_Q_PROJ_A_WEIGHT] =
+      torch::cat({at_host_weight_tensors_[IN_KV_PROJ_WITH_MQA_WEIGHT],
+                  at_host_weight_tensors_[IN_Q_PROJ_A_WEIGHT]},
                  0)
           .contiguous();
   if (quantize_type_ == "w8a8_dynamic") {
-    at_weight_tensors_[IN_Q_PROJ_A_BIAS] =
-        torch::cat({at_weight_tensors_[IN_KV_PROJ_WITH_MQA_BIAS],
-                    at_weight_tensors_[IN_Q_PROJ_A_BIAS]},
+    at_host_weight_tensors_[IN_Q_PROJ_A_BIAS] =
+        torch::cat({at_host_weight_tensors_[IN_KV_PROJ_WITH_MQA_BIAS],
+                    at_host_weight_tensors_[IN_Q_PROJ_A_BIAS]},
                    0)
             .contiguous();
-    at_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
-        torch::cat({at_weight_tensors_[IN_KV_PROJ_WITH_MQA_DESCALE],
-                    at_weight_tensors_[IN_Q_PROJ_A_DESCALE]},
+    at_host_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
+        torch::cat({at_host_weight_tensors_[IN_KV_PROJ_WITH_MQA_DESCALE],
+                    at_host_weight_tensors_[IN_Q_PROJ_A_DESCALE]},
                    0)
             .contiguous();
   }
 
-  at_weight_tensors_[IN_Q_PROJ_A_WEIGHT] = at_npu::native::npu_format_cast(
-      at_weight_tensors_[IN_Q_PROJ_A_WEIGHT], 29);
-  at_weight_tensors_[IN_Q_PROJ_A_RECOMPUTE_WEIGHT] =
-      at_npu::native::npu_format_cast(
-          at_weight_tensors_[IN_Q_PROJ_A_RECOMPUTE_WEIGHT], 29);
-  at_weight_tensors_[IN_Q_PROJ_B_WEIGHT] = at_npu::native::npu_format_cast(
-      at_weight_tensors_[IN_Q_PROJ_B_WEIGHT], 29);
+  at_host_weight_tensors_[IN_Q_PROJ_A_WEIGHT] =
+      at_host_weight_tensors_[IN_Q_PROJ_A_WEIGHT].contiguous();
+  at_host_weight_tensors_[IN_Q_PROJ_A_RECOMPUTE_WEIGHT] =
+      at_host_weight_tensors_[IN_Q_PROJ_A_RECOMPUTE_WEIGHT].contiguous();
+  at_host_weight_tensors_[IN_Q_PROJ_B_WEIGHT] =
+      at_host_weight_tensors_[IN_Q_PROJ_B_WEIGHT].contiguous();
 
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_WEIGHT] = tensor_placeholder_;
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_BIAS] = tensor_placeholder_;
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_DESCALE] = tensor_placeholder_;
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_OFFSET] = tensor_placeholder_;
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_SCALE] = tensor_placeholder_;
+  at_host_weight_tensors_[IN_KV_PROJ_WITH_MQA_WEIGHT] = tensor_placeholder_;
+  at_host_weight_tensors_[IN_KV_PROJ_WITH_MQA_BIAS] = tensor_placeholder_;
+  at_host_weight_tensors_[IN_KV_PROJ_WITH_MQA_DESCALE] = tensor_placeholder_;
+  at_host_weight_tensors_[IN_KV_PROJ_WITH_MQA_OFFSET] = tensor_placeholder_;
+  at_host_weight_tensors_[IN_KV_PROJ_WITH_MQA_SCALE] = tensor_placeholder_;
   if (FLAGS_expert_parallel_degree != 2) {
-    at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
-        torch::roll(at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT],
+    at_host_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
+        torch::roll(at_host_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT],
                     {-1 * ep_rank_ * num_experts_per_partition_},
                     {0})
             .contiguous();
-    at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_BIAS] =
-        torch::roll(at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_BIAS],
+    at_host_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_BIAS] =
+        torch::roll(at_host_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_BIAS],
                     {-1 * ep_rank_ * num_experts_per_partition_},
                     {0})
             .to(torch::kFloat32)
             .contiguous();
   }
-  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT] =
-  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT].transpose(0, 1);
-  at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
-      at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
-  at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT].to(torch::kBFloat16);
-  at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].to(
+  // at_host_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT] =
+  // at_host_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT].transpose(0, 1);
+  at_host_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
+      at_host_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(
+          torch::kFloat32);
+  at_host_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
+      at_host_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT].to(torch::kBFloat16);
+  at_host_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
+      at_host_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].to(
           torch::kBFloat16);
-  at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
-      at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT].to(torch::kBFloat16);
-  at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
-      at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].to(torch::kBFloat16);
+  at_host_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
+      at_host_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT].to(torch::kBFloat16);
+  at_host_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
+      at_host_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].to(
+          torch::kBFloat16);
   if (quantize_type_ == "w8a8_dynamic") {
-    // at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
-    //     at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
+    // at_host_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
+    //     at_host_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
     if (!prefill_isBF16_) {
-      at_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
-          convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_A_DESCALE]);
-      at_weight_tensors_[IN_Q_PROJ_A_RECOMPUTE_DESCALE] = convert_fp16_to_int64(
-          at_weight_tensors_[IN_Q_PROJ_A_RECOMPUTE_DESCALE]);
-      at_weight_tensors_[IN_Q_PROJ_B_DESCALE] =
-          convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_B_DESCALE]);
-      at_weight_tensors_[IN_ATTENTION_OUT_DESCALE] =
-          convert_fp16_to_int64(at_weight_tensors_[IN_ATTENTION_OUT_DESCALE]);
+      at_host_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
+          convert_fp16_to_int64(at_host_weight_tensors_[IN_Q_PROJ_A_DESCALE]);
+      at_host_weight_tensors_[IN_Q_PROJ_A_RECOMPUTE_DESCALE] =
+          convert_fp16_to_int64(
+              at_host_weight_tensors_[IN_Q_PROJ_A_RECOMPUTE_DESCALE]);
+      at_host_weight_tensors_[IN_Q_PROJ_B_DESCALE] =
+          convert_fp16_to_int64(at_host_weight_tensors_[IN_Q_PROJ_B_DESCALE]);
+      at_host_weight_tensors_[IN_ATTENTION_OUT_DESCALE] = convert_fp16_to_int64(
+          at_host_weight_tensors_[IN_ATTENTION_OUT_DESCALE]);
 
-      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT].to(
+      at_host_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT] =
+          at_host_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT].to(
               torch::kFloat16);
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].to(
+      at_host_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
+          at_host_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].to(
               torch::kFloat32);
-      at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].to(
+      at_host_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
+          at_host_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].to(
               torch::kFloat32);
-      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT].to(torch::kFloat16);
-      at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] =
-          at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT].to(torch::kFloat16);
-      at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
-          at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT].to(torch::kFloat32);
+      at_host_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
+          at_host_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT].to(
+              torch::kFloat16);
+      at_host_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] =
+          at_host_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT].to(
+              torch::kFloat16);
+      at_host_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
+          at_host_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT].to(torch::kFloat32);
     }
   }
+}
+
+bool DeepseekV32DecoderManualLoader::is_nz_format_tensor(int weight_index) {
+  if (weight_index == IN_Q_PROJ_A_WEIGHT ||
+      weight_index == IN_Q_PROJ_A_RECOMPUTE_WEIGHT ||
+      weight_index == IN_Q_PROJ_B_WEIGHT ||
+      weight_index == IN_MLP_GATEUP_WEIGHT_EXPERT) {
+    return true;
+  }
+#if defined(USE_A3)
+  if (weight_index == IN_MLP_DOWN_WEIGHT_EXPERT) {
+    return true;
+  }
+#endif
+  return false;
 }
 
 }  // namespace layer

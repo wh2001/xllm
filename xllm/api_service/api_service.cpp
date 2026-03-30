@@ -1022,6 +1022,20 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
     remove_model_master(master_options.model_id());
   }
 
+  if (FLAGS_sleep_initial_model &&
+      !initial_master_slept_.exchange(true) && master_ != nullptr &&
+      !master_->is_sleeping()) {
+    LOG(INFO) << "Sleeping initial master (loaded via --model) to free GPU memory";
+    master_->get_rate_limiter()->try_set_sleeping();
+    master_->set_master_status(MasterStatus(MasterStatus::LIGHT_SLEEP));
+    if (master_->sleep()) {
+      LOG(INFO) << "Initial master slept successfully, GPU memory freed";
+    } else {
+      LOG(WARNING) << "Failed to sleep initial master";
+      initial_master_slept_.store(false);
+    }
+  }
+
   auto master = fork_master(master_, master_options);
   if (!master) {
     LOG(ERROR) << "Failed to fork master: " << master_options.model_id();
@@ -1053,20 +1067,6 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
     chat_service_impl_->add_model_master(master_options.model_id(), llm_master);
   }
   master.release();
-
-  if (FLAGS_sleep_initial_model &&
-      !initial_master_slept_.exchange(true) && master_ != nullptr &&
-      !master_->is_sleeping()) {
-    LOG(INFO) << "Sleeping initial master (loaded via --model) to free GPU memory";
-    master_->get_rate_limiter()->try_set_sleeping();
-    master_->set_master_status(MasterStatus(MasterStatus::LIGHT_SLEEP));
-    if (master_->sleep()) {
-      LOG(INFO) << "Initial master slept successfully, GPU memory freed";
-    } else {
-      LOG(WARNING) << "Failed to sleep initial master";
-      initial_master_slept_.store(false);
-    }
-  }
 }
 
 void APIService::Sleep(::google::protobuf::RpcController* controller,

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,31 +15,32 @@ limitations under the License.
 
 #pragma once
 
-#include "base_loader.h"
+#include "base_manual_loader.h"
 
 namespace xllm {
 namespace layer {
 
-class DeekseekV2DecoderLoader : public BaseLoader {
+class DeepseekV32DecoderManualLoader : public BaseManualLoader {
  public:
-  DeekseekV2DecoderLoader(uint64_t weight_count,
-                          const ModelContext& context,
-                          int32_t layer_id,
-                          int32_t prefill_firstKDenseReplace,
-                          int32_t prefill_numOfDeviceExperts,
-                          int32_t prefill_qkRopeHeadDim,
-                          int32_t prefill_numAttentionHeadsPerRank,
-                          int32_t decode_worldSize,
-                          int32_t qk_nope_head_dim_,
-                          int32_t kv_lora_rank,
-                          int32_t num_key_value_heads,
-                          int32_t v_head_dim,
-                          bool prefill_isBF16,
-                          bool decode_isBF16);
+  DeepseekV32DecoderManualLoader(uint64_t weight_count,
+                                 const ModelContext& context,
+                                 int32_t layer_id,
+                                 int32_t prefill_firstKDenseReplace,
+                                 int32_t prefill_numOfDeviceExperts,
+                                 int32_t prefill_qkRopeHeadDim,
+                                 int32_t prefill_numAttentionHeadsPerRank,
+                                 int32_t decode_worldSize,
+                                 int32_t qk_nope_head_dim_,
+                                 int32_t kv_lora_rank,
+                                 int32_t num_key_value_heads,
+                                 int32_t v_head_dim,
+                                 bool prefill_isBF16,
+                                 bool decode_isBF16);
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights(const std::string& prefix) const override;
-  void merge_loaded_weights() override;
+  void merge_host_at_weights() override;
+  bool is_nz_format_tensor(int weight_index) override;
 
  protected:
   void initialize_device_expert_list(int num_device, int num_device_expert);
@@ -103,12 +104,10 @@ class DeekseekV2DecoderLoader : public BaseLoader {
   void merge_experts_weights();
 
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts,
-                                      at::Device device,
                                       bool transpose = false);
 
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts_up,
                                       std::vector<torch::Tensor>& experts_gate,
-                                      at::Device device,
                                       bool transpose = false);
 
   void squeeze_experts_weights();

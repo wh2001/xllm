@@ -45,7 +45,9 @@ cc_library(
     loader/lm_head_loader.h
     loader/column_parallel_linear_loader.h
     loader/deepseek_v2_decoder_loader.h
+    loader/deepseek_v2_decoder_manual_loader.h
     loader/deepseek_v32_decoder_loader.h
+    loader/deepseek_v32_decoder_manual_loader.h
     loader/glm4_decoder_loader.h
     loader/glm4_moe_decoder_loader.h
     loader/glm4_moe_lite_decoder_loader.h
@@ -104,7 +106,9 @@ cc_library(
     loader/lm_head_loader.cpp
     loader/column_parallel_linear_loader.cpp
     loader/deepseek_v2_decoder_loader.cpp
+    loader/deepseek_v2_decoder_manual_loader.cpp
     loader/deepseek_v32_decoder_loader.cpp
+    loader/deepseek_v32_decoder_manual_loader.cpp
     loader/glm4_decoder_loader.cpp
     loader/glm4_moe_decoder_loader.cpp
     loader/glm4_moe_lite_decoder_loader.cpp

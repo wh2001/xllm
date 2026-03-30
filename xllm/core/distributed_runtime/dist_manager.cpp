@@ -276,9 +276,9 @@ void DistManager::setup_multi_node_workers(
   // Master node: wait for all workers to connect
   if (options.node_rank() == 0) {
     // For TP>1 (nnodes>1), use a timeout shorter than xllm-service's
-    // kForkTimeoutMs (120s) so we can clean up and propagate the error
+    // kForkTimeoutMs so we can clean up and propagate the error
     // before the client gives up.  For nnodes==1 keep infinite wait.
-    const int wait_timeout_sec = (options.nnodes() > 1) ? 90 : 0;
+    const int wait_timeout_sec = (options.nnodes() > 1) ? 540 : 0;
 
     std::unordered_map<int32_t, std::string> worker_addrs_map;
     try {

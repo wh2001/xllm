@@ -132,8 +132,9 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
                          instance_info_.v_cache_ids);
   instance_info_.dp_size = options_.dp_size();
 
-  engine->get_device_info(instance_info_.device_ips, instance_info_.ports);
-  engine->get_p2p_addrs(instance_info_.p2p_addrs);
+  // device_ips, ports, p2p_addrs are already populated by the
+  // ContinuousScheduler (parent) constructor — no need to call
+  // get_device_info / get_p2p_addrs again here.
 
   // Get total physical pages per worker (for etcd registration)
 #if defined(USE_NPU)
@@ -525,8 +526,16 @@ void DisaggPDScheduler::dispatch_requests() {
                                      layer_offsets.k_offsets().end());
               layer.v_offsets.assign(layer_offsets.v_offsets().begin(),
                                      layer_offsets.v_offsets().end());
+              layer.index_offsets.assign(layer_offsets.index_offsets().begin(),
+                                         layer_offsets.index_offsets().end());
               info.dst_xtensor_layer_offsets.emplace_back(std::move(layer));
             }
+            info.dst_xtensor_block_bytes.k_block_bytes =
+                resp.xtensor_block_bytes().k_block_bytes();
+            info.dst_xtensor_block_bytes.v_block_bytes =
+                resp.xtensor_block_bytes().v_block_bytes();
+            info.dst_xtensor_block_bytes.index_block_bytes =
+                resp.xtensor_block_bytes().index_block_bytes();
             XLLM_DLOG(INFO) << "[DIAG] Received XTensor offsets, num_layers="
                       << info.dst_xtensor_layer_offsets.size();
           } else {
