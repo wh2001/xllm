@@ -96,10 +96,10 @@ folly::SemiFuture<bool> KVCacheTransfer::push_kv_blocks_async(
                         promise = std::move(promise)]() mutable {
     std::unordered_map<std::string, KVCacheInfo> merged_kv_infos;
     XLLM_DLOG(INFO) << "[DIAG] push_kv_blocks_async: merge_kv_blocks starting"
-              << ", transfer_kv_infos.size=" << transfer_kv_infos.size();
+                    << ", transfer_kv_infos.size=" << transfer_kv_infos.size();
     merge_kv_blocks(merged_kv_infos, transfer_kv_infos, parallel_args);
     XLLM_DLOG(INFO) << "[DIAG] push_kv_blocks_async: merge_kv_blocks done"
-              << ", merged_kv_infos.size=" << merged_kv_infos.size();
+                    << ", merged_kv_infos.size=" << merged_kv_infos.size();
     bool success = true;
     if (!merged_kv_infos.empty()) {
       success = this->push_kv_blocks(
@@ -107,7 +107,8 @@ folly::SemiFuture<bool> KVCacheTransfer::push_kv_blocks_async(
     } else {
       XLLM_DLOG(WARNING) << "[DIAG] merged_kv_infos is EMPTY, KV push skipped!";
     }
-    XLLM_DLOG(INFO) << "[DIAG] push_kv_blocks_async completed, success=" << success;
+    XLLM_DLOG(INFO) << "[DIAG] push_kv_blocks_async completed, success="
+                    << success;
     promise.setValue(success);
   });
   return future;
@@ -130,14 +131,15 @@ void KVCacheTransfer::merge_kv_blocks(
     int32_t dst_dp_size = info.remote_instance_info.dp_size;
     int32_t dst_world_size = info.remote_instance_info.cluster_ids.size();
     XLLM_DLOG(INFO) << "[DIAG] merge_kv_blocks: dst_dp_rank=" << dst_dp_rank
-              << ", dst_dp_size=" << dst_dp_size
-              << ", dst_world_size=" << dst_world_size
-              << ", src_rank=" << src_rank
-              << ", src_dp_size=" << src_dp_size
-              << ", src_world_size=" << src_world_size;
+                    << ", dst_dp_size=" << dst_dp_size
+                    << ", dst_world_size=" << dst_world_size
+                    << ", src_rank=" << src_rank
+                    << ", src_dp_size=" << src_dp_size
+                    << ", src_world_size=" << src_world_size;
     if (dst_dp_size <= 0) {
-      XLLM_DLOG(ERROR) << "[DIAG] dst_dp_size is " << dst_dp_size
-                 << ", this will cause division by zero! Skipping this info.";
+      XLLM_DLOG(ERROR)
+          << "[DIAG] dst_dp_size is " << dst_dp_size
+          << ", this will cause division by zero! Skipping this info.";
       continue;
     }
     int32_t dst_tp_size = dst_world_size / dst_dp_size;

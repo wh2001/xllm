@@ -16,13 +16,12 @@ limitations under the License.
 #include "api_service.h"
 
 #include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <glog/logging.h>
 #include <google/protobuf/util/json_util.h>
 #include <json2pb/json_to_pb.h>
 #include <json2pb/pb_to_json.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <filesystem>
 #include <limits>
@@ -923,11 +922,10 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
   return true;
 }
 
-void APIService::GetFreePortHttp(
-    ::google::protobuf::RpcController* controller,
-    const proto::HttpRequest* /*request*/,
-    proto::HttpResponse* /*response*/,
-    ::google::protobuf::Closure* done) {
+void APIService::GetFreePortHttp(::google::protobuf::RpcController* controller,
+                                 const proto::HttpRequest* /*request*/,
+                                 proto::HttpResponse* /*response*/,
+                                 ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
@@ -950,8 +948,8 @@ void APIService::GetFreePortHttp(
 
   ctrl->http_response().set_content_type("application/json");
   if (port > 0) {
-    ctrl->response_attachment().append(
-        "{\"port\":" + std::to_string(port) + "}");
+    ctrl->response_attachment().append("{\"port\":" + std::to_string(port) +
+                                       "}");
   } else {
     ctrl->http_response().set_status_code(500);
     ctrl->response_attachment().append("{\"port\":-1}");
@@ -1022,10 +1020,11 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
     remove_model_master(master_options.model_id());
   }
 
-  if (FLAGS_sleep_initial_model &&
-      !initial_master_slept_.exchange(true) && master_ != nullptr &&
-      !master_->is_sleeping()) {
-    LOG(INFO) << "Sleeping initial master (loaded via --model) to free GPU memory";
+  if (FLAGS_sleep_initial_model && FLAGS_node_rank == 0 &&
+      !initial_master_slept_.exchange(true) &&
+      master_ != nullptr && !master_->is_sleeping()) {
+    LOG(INFO)
+        << "Sleeping initial master (loaded via --model) to free GPU memory";
     master_->get_rate_limiter()->try_set_sleeping();
     master_->set_master_status(MasterStatus(MasterStatus::LIGHT_SLEEP));
     if (master_->sleep()) {

@@ -725,7 +725,7 @@ void PageAllocator::trim_kv_cache(const std::string& model_id,
 }
 
 bool PageAllocator::resize_kv_cache(const std::string& model_id,
-                                     size_t new_total_virt_pages) {
+                                    size_t new_total_virt_pages) {
   std::lock_guard<std::mutex> lock(mtx_);
 
   CHECK(initialized_) << "PageAllocator not initialized";
@@ -734,8 +734,8 @@ bool PageAllocator::resize_kv_cache(const std::string& model_id,
   size_t old_total = state.num_total_virt_pages;
 
   if (new_total_virt_pages == old_total) {
-    LOG(INFO) << "resize_kv_cache: model=" << model_id
-              << " already has " << old_total << " pages, no-op";
+    LOG(INFO) << "resize_kv_cache: model=" << model_id << " already has "
+              << old_total << " pages, no-op";
     return true;
   }
 
@@ -768,9 +768,8 @@ bool PageAllocator::resize_kv_cache(const std::string& model_id,
     }
 
     state.num_total_virt_pages = new_total_virt_pages;
-    LOG(INFO) << "resize_kv_cache: expanded model=" << model_id
-              << " from " << old_total << " to " << new_total_virt_pages
-              << " virt pages";
+    LOG(INFO) << "resize_kv_cache: expanded model=" << model_id << " from "
+              << old_total << " to " << new_total_virt_pages << " virt pages";
   } else {
     // --- Shrink ---
     size_t pages_to_remove = old_total - new_total_virt_pages;
@@ -783,7 +782,8 @@ bool PageAllocator::resize_kv_cache(const std::string& model_id,
       if (available_free < pages_to_remove) {
         LOG(ERROR) << "resize_kv_cache: cannot shrink model=" << model_id
                    << " dp_rank=" << dp << ": only " << available_free
-                   << " free/reserved pages available, need " << pages_to_remove;
+                   << " free/reserved pages available, need "
+                   << pages_to_remove;
         return false;
       }
     }
@@ -802,12 +802,11 @@ bool PageAllocator::resize_kv_cache(const std::string& model_id,
 
       // Remove from reserved list (these need physical page release)
       if (remaining > 0 && !dp_pages.reserved_virt_page_list.empty()) {
-        size_t from_reserved = std::min(
-            remaining, dp_pages.reserved_virt_page_list.size());
+        size_t from_reserved =
+            std::min(remaining, dp_pages.reserved_virt_page_list.size());
         // Release physical pages for reserved pages being removed
         release_phy_pages_for_dp(
-            model_id, dp,
-            from_reserved * state.phy_pages_per_virt_page);
+            model_id, dp, from_reserved * state.phy_pages_per_virt_page);
         for (size_t i = 0; i < from_reserved; ++i) {
           dp_pages.reserved_virt_page_list.pop_back();
         }
@@ -816,9 +815,8 @@ bool PageAllocator::resize_kv_cache(const std::string& model_id,
     }
 
     state.num_total_virt_pages = new_total_virt_pages;
-    LOG(INFO) << "resize_kv_cache: shrunk model=" << model_id
-              << " from " << old_total << " to " << new_total_virt_pages
-              << " virt pages";
+    LOG(INFO) << "resize_kv_cache: shrunk model=" << model_id << " from "
+              << old_total << " to " << new_total_virt_pages << " virt pages";
   }
 
   update_memory_usage();

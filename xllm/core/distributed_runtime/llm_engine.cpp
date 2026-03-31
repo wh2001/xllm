@@ -128,7 +128,7 @@ namespace xllm {
 // Defines a npu memory alignment constant with 16-byte alignment
 constexpr int32_t NZ_ALIGNMENT = 16;
 // Extra weight pages reserved for mapping/alignment overhead.
-constexpr size_t kXTensorWeightPageSafetyMargin = 2000;
+constexpr size_t kXTensorWeightPageSafetyMargin = 1000;
 
 LLMEngine::LLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
@@ -1108,7 +1108,7 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   XLLM_DLOG(INFO) << "[DIAG-ENGINE] prepare_inputs starting";
   auto raw_forward_inputs = prepare_inputs(batch);
   XLLM_DLOG(INFO) << "[DIAG-ENGINE] prepare_inputs done, size="
-            << raw_forward_inputs.size();
+                  << raw_forward_inputs.size();
   DCHECK(dp_size_ == raw_forward_inputs.size())
       << "The processed raw forward inputs size " << raw_forward_inputs.size()
       << " is not equal to dp size " << dp_size_ << ".";
@@ -1120,12 +1120,13 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     auto dp_rank = worker_rank / dp_local_tp_size_;
     XLLM_DLOG(INFO) << "[DIAG-ENGINE] dispatching step_async to worker_rank="
-              << worker_rank;
+                    << worker_rank;
     futures.emplace_back(
         worker_clients_[worker_rank]->step_async(raw_forward_inputs[dp_rank]));
   }
 
-  XLLM_DLOG(INFO) << "[DIAG-ENGINE] all step_async dispatched, waiting collectAll";
+  XLLM_DLOG(INFO)
+      << "[DIAG-ENGINE] all step_async dispatched, waiting collectAll";
   // wait for the all future to complete
   auto results = folly::collectAll(futures).get();
   XLLM_DLOG(INFO) << "[DIAG-ENGINE] collectAll completed";
@@ -1440,8 +1441,8 @@ bool LLMEngine::resize(uint64_t new_kv_cache_pages) {
     }
   }
 
-  if (!page_allocator.resize_kv_cache(model_id,
-                                       static_cast<size_t>(new_kv_cache_pages))) {
+  if (!page_allocator.resize_kv_cache(
+          model_id, static_cast<size_t>(new_kv_cache_pages))) {
     LOG(ERROR) << "Failed to resize KV cache for model=" << model_id;
     return false;
   }

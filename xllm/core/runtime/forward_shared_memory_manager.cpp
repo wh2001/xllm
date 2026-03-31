@@ -494,8 +494,8 @@ inline void write_instance_info(char*& buffer, const InstanceInfo& info) {
     const uint64_t prof_size = data.size();
     write_data(buffer, prof_size);
     if (prof_size > 0) {
-      std::memcpy(buffer, data.data(),
-                  prof_size * sizeof(std::pair<int32_t, double>));
+      std::memcpy(
+          buffer, data.data(), prof_size * sizeof(std::pair<int32_t, double>));
       buffer += prof_size * sizeof(std::pair<int32_t, double>);
     }
   }
@@ -896,8 +896,8 @@ inline void read_instance_info(const char*& buffer, InstanceInfo& info) {
     read_data(buffer, prof_size);
     std::vector<std::pair<int32_t, double>> data(prof_size);
     if (prof_size > 0) {
-      std::memcpy(data.data(), buffer,
-                  prof_size * sizeof(std::pair<int32_t, double>));
+      std::memcpy(
+          data.data(), buffer, prof_size * sizeof(std::pair<int32_t, double>));
       buffer += prof_size * sizeof(std::pair<int32_t, double>);
     }
     info.ttft_profiling_data[model_id] = std::move(data);

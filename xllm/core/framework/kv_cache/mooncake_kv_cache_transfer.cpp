@@ -497,15 +497,16 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_xtensor_mode(
   }
 
   XLLM_DLOG(INFO) << "[DIAG] push_kv_blocks_xtensor_mode starting"
-            << ", model_id=" << model_id_
-            << ", num_layers=" << num_layers_
-            << ", merged_kv_infos.size=" << merged_kv_infos.size();
+                  << ", model_id=" << model_id_
+                  << ", num_layers=" << num_layers_
+                  << ", merged_kv_infos.size=" << merged_kv_infos.size();
   for (const auto& pair : merged_kv_infos) {
-    XLLM_DLOG(INFO) << "[DIAG] KV push target: dst_addr=" << pair.second.dst_addr
-              << ", src_blocks.size=" << pair.second.src_blocks.size()
-              << ", dst_blocks.size=" << pair.second.dst_blocks.size()
-              << ", dst_xtensor_layer_offsets.size="
-              << pair.second.dst_xtensor_layer_offsets.size();
+    XLLM_DLOG(INFO) << "[DIAG] KV push target: dst_addr="
+                    << pair.second.dst_addr
+                    << ", src_blocks.size=" << pair.second.src_blocks.size()
+                    << ", dst_blocks.size=" << pair.second.dst_blocks.size()
+                    << ", dst_xtensor_layer_offsets.size="
+                    << pair.second.dst_xtensor_layer_offsets.size();
   }
 
   std::unordered_map<std::string, XTensorOffsetsResponse> src_xtensor_infos;
@@ -610,7 +611,7 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_xtensor_mode(
   }
 
   XLLM_DLOG(INFO) << "[DIAG] push_kv_blocks_xtensor_mode completed successfully"
-            << ", num_layers=" << num_layers_;
+                  << ", num_layers=" << num_layers_;
   return true;
 }
 

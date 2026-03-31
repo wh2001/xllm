@@ -647,7 +647,8 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
   ForwardInput input_on_device;
 
   prepare_work_before_execute(input, input_on_device);
-  XLLM_DLOG(INFO) << "[DIAG-WI] prepare_work_before_execute completed, scheduling step";
+  XLLM_DLOG(INFO)
+      << "[DIAG-WI] prepare_work_before_execute completed, scheduling step";
 
   folly::Promise<std::optional<ForwardOutput>> promise;
   auto future = promise.getSemiFuture();

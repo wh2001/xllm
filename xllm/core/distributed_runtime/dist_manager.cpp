@@ -16,6 +16,7 @@ limitations under the License.
 #include "distributed_runtime/dist_manager.h"
 
 #include <glog/logging.h>
+
 #include <stdexcept>
 
 #include "comm_channel.h"
@@ -239,8 +240,8 @@ void DistManager::setup_multi_node_workers(
                  << master_node_addr
                  << ". Cannot proceed without distributed runtime.";
       ServerRegistry::get_instance().unregister_server(server_name_);
-      throw std::runtime_error(
-          "CollectiveServer bind failed on " + master_node_addr);
+      throw std::runtime_error("CollectiveServer bind failed on " +
+                               master_node_addr);
     }
     actual_master_addr = collective_server->listen_address();
     LOG(INFO) << "CollectiveServer actual address: " << actual_master_addr;

@@ -37,8 +37,8 @@ limitations under the License.
 namespace xllm {
 
 // Configuration constants
-constexpr int32_t MIN_RESERVED_PAGES = 8;
-constexpr int32_t MAX_RESERVED_PAGES = 32;
+constexpr int32_t MIN_RESERVED_PAGES = 4;
+constexpr int32_t MAX_RESERVED_PAGES = 8;
 constexpr bool PAGE_PREALLOC_ENABLED = true;
 constexpr double PREALLOC_THREAD_TIMEOUT = 2.0;  // seconds
 /**
@@ -146,8 +146,8 @@ class PageAllocator {
   void trim_kv_cache(const std::string& model_id, int32_t dp_rank);
 
   // Resize KV cache: change the total number of virtual pages for a model.
-  // If expanding: allocates more virtual pages (requires available physical pages).
-  // If shrinking: trims free pages first, then reduces total count.
+  // If expanding: allocates more virtual pages (requires available physical
+  // pages). If shrinking: trims free pages first, then reduces total count.
   // Returns true on success.
   bool resize_kv_cache(const std::string& model_id,
                        size_t new_total_virt_pages);
@@ -231,7 +231,7 @@ class PageAllocator {
     size_t blocks_per_virt_page = 0;
     XTensorKvPageLayout kv_layout;
     size_t weight_pages_allocated = 0;  // Not cleared on free, used for wakeup
-    bool weight_on_device = false;      // True only when pages physically allocated
+    bool weight_on_device = false;  // True only when pages physically allocated
     bool is_sleeping = false;
     // Count of pending map operations (for safe sleep)
     std::atomic<int> pending_map_ops{0};

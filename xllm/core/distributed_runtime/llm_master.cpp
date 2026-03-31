@@ -474,15 +474,14 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   }
 
   if (!batch_callback) {
-    batch_callback =
-        [callback](const std::vector<RequestOutput>& outputs) {
-          std::vector<bool> status_set;
-          status_set.reserve(outputs.size());
-          for (const auto& output : outputs) {
-            status_set.push_back(callback(output));
-          }
-          return status_set;
-        };
+    batch_callback = [callback](const std::vector<RequestOutput>& outputs) {
+      std::vector<bool> status_set;
+      status_set.reserve(outputs.size());
+      for (const auto& output : outputs) {
+        status_set.push_back(callback(output));
+      }
+      return status_set;
+    };
   }
 
   RequestState req_state(std::move(prompt),

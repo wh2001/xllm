@@ -176,9 +176,8 @@ proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
 
   // When decode_rpc_address is provided, use it as the cache key to
   // distinguish channels to different models on the same instance.
-  std::string channel_key = decode_rpc_address.empty()
-                                ? instance_name
-                                : decode_rpc_address;
+  std::string channel_key =
+      decode_rpc_address.empty() ? instance_name : decode_rpc_address;
   auto it = instance_channel_map_.find(channel_key);
   if (it == instance_channel_map_.end()) {
     // Always populate remote_instances_info_ for KV cache transfer
@@ -207,9 +206,8 @@ proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
     options.timeout_ms = FLAGS_rpc_channel_timeout_ms;
     options.max_retry = 3;
     std::string load_balancer = "";
-    if (channel->Init(target_address.c_str(),
-                      load_balancer.c_str(),
-                      &options) != 0) {
+    if (channel->Init(
+            target_address.c_str(), load_balancer.c_str(), &options) != 0) {
       LOG(ERROR) << "Fail to initialize channel for " << target_address;
       if (decode_rpc_address.empty()) {
         remote_instances_info_.erase(instance_name);
@@ -287,8 +285,8 @@ void DisaggPDScheduler::dispatch_requests() {
     }
 
     XLLM_DLOG(INFO) << "[DIAG] dispatch_requests: dequeued request "
-              << request->request_id()
-              << ", decode_address=" << request->state().decode_address;
+                    << request->request_id()
+                    << ", decode_address=" << request->state().decode_address;
 
     if (request->state().decode_address.empty()) {
       // No decode address provided to the prefill instance, just finish the
@@ -307,8 +305,8 @@ void DisaggPDScheduler::dispatch_requests() {
     if (request->state().decode_address ==
         xservice_client_->get_instance_name()) {
       XLLM_DLOG(INFO) << "[DIAG] Local PD detected for request "
-                << request->request_id()
-                << ", closing HTTP and switching to RPC path";
+                      << request->request_id()
+                      << ", closing HTTP and switching to RPC path";
       request->state().local_pd = true;
 
       // Notify the rate limiter that the prefill slot is released, but do
@@ -454,9 +452,11 @@ void DisaggPDScheduler::dispatch_requests() {
 
     // TODO: sync rpc here currently
     brpc::Controller cntl;
-    XLLM_DLOG(INFO) << "[DIAG] Sending AddNewRequests RPC to " << selected_instance;
+    XLLM_DLOG(INFO) << "[DIAG] Sending AddNewRequests RPC to "
+                    << selected_instance;
     stub->AddNewRequests(&cntl, &reqs, &resps, nullptr);
-    XLLM_DLOG(INFO) << "[DIAG] AddNewRequests RPC returned, failed=" << cntl.Failed();
+    XLLM_DLOG(INFO) << "[DIAG] AddNewRequests RPC returned, failed="
+                    << cntl.Failed();
     if (cntl.Failed()) {
       LOG(ERROR) << "Failed to add new requests to decode instance : "
                  << selected_instance << ", error text : " << cntl.ErrorText();
@@ -477,7 +477,7 @@ void DisaggPDScheduler::dispatch_requests() {
     // check reqs which can not dispatch to D instance,
     // and push back to prefill_request_queue_
     XLLM_DLOG(INFO) << "[DIAG] resps.resps().size()=" << resps.resps().size()
-              << ", requests.size()=" << requests.size();
+                    << ", requests.size()=" << requests.size();
     CHECK_EQ(requests.size(), resps.resps().size())
         << "selected_instance : " << selected_instance;
     // insert instance name to linked_instance_
@@ -485,12 +485,14 @@ void DisaggPDScheduler::dispatch_requests() {
       std::lock_guard<std::mutex> lock(linked_instances_mutex_);
       linked_instance_.emplace(selected_instance);
     }
-    XLLM_DLOG(INFO) << "[DIAG] linked_instance_ updated, entering response loop";
+    XLLM_DLOG(INFO)
+        << "[DIAG] linked_instance_ updated, entering response loop";
     for (size_t i = 0; i < requests.size(); ++i) {
-      XLLM_DLOG(INFO) << "[DIAG] response[" << i << "] status_code="
-                << resps.resps()[i].status_code();
+      XLLM_DLOG(INFO) << "[DIAG] response[" << i
+                      << "] status_code=" << resps.resps()[i].status_code();
       if (resps.resps()[i].status_code() != 200) {
-        XLLM_DLOG(WARNING) << "[DIAG] status_code != 200, pushing back to prefill queue";
+        XLLM_DLOG(WARNING)
+            << "[DIAG] status_code != 200, pushing back to prefill queue";
         // push back to prefill_request_queue_
         if (requests[i]->offline()) {
           prefill_request_queue_offline_.enqueue(requests[i]);
@@ -500,7 +502,8 @@ void DisaggPDScheduler::dispatch_requests() {
 
       } else {
         XLLM_DLOG(INFO) << "[DIAG] status_code=200, setting up TransferKVInfo"
-                  << ", sequences.size=" << requests[i]->sequences().size();
+                        << ", sequences.size="
+                        << requests[i]->sequences().size();
         for (auto& sequence : requests[i]->sequences()) {
           TransferKVInfo info;
           info.request_id = requests[i]->request_id();
@@ -514,9 +517,9 @@ void DisaggPDScheduler::dispatch_requests() {
           // XTensor mode: save destination offsets from D-node
           const auto& resp = resps.resps()[i];
           XLLM_DLOG(INFO) << "[DIAG] xtensor_layer_offsets_size="
-                    << resp.xtensor_layer_offsets_size()
-                    << ", remote_blocks_ids.size="
-                    << info.remote_blocks_ids.size();
+                          << resp.xtensor_layer_offsets_size()
+                          << ", remote_blocks_ids.size="
+                          << info.remote_blocks_ids.size();
           if (resp.xtensor_layer_offsets_size() > 0) {
             info.dst_xtensor_layer_offsets.reserve(
                 resp.xtensor_layer_offsets_size());
@@ -537,7 +540,7 @@ void DisaggPDScheduler::dispatch_requests() {
             info.dst_xtensor_block_bytes.index_block_bytes =
                 resp.xtensor_block_bytes().index_block_bytes();
             XLLM_DLOG(INFO) << "[DIAG] Received XTensor offsets, num_layers="
-                      << info.dst_xtensor_layer_offsets.size();
+                            << info.dst_xtensor_layer_offsets.size();
           } else {
             XLLM_DLOG(WARNING) << "[DIAG] No XTensor offsets from D-node!";
           }
@@ -548,14 +551,15 @@ void DisaggPDScheduler::dispatch_requests() {
         }
 
         // push to request_queue_, and will be executed by engine.
-        XLLM_DLOG(INFO) << "[DIAG] Request dispatched, writing to request_queue_"
-                  << ", remote_instance_info.cluster_ids.size="
-                  << remote_instances_info_[selected_instance].cluster_ids.size()
-                  << ", dp_size="
-                  << remote_instances_info_[selected_instance].dp_size;
+        XLLM_DLOG(INFO)
+            << "[DIAG] Request dispatched, writing to request_queue_"
+            << ", remote_instance_info.cluster_ids.size="
+            << remote_instances_info_[selected_instance].cluster_ids.size()
+            << ", dp_size="
+            << remote_instances_info_[selected_instance].dp_size;
         request_queue_.write(requests[i]);
         XLLM_DLOG(INFO) << "[DIAG] request_queue_.write done for request "
-                  << requests[i]->request_id();
+                        << requests[i]->request_id();
       }
     }
     XLLM_DLOG(INFO) << "[DIAG] dispatch loop iteration complete";
@@ -580,7 +584,7 @@ void DisaggPDScheduler::prefill_send_first_generation() {
       // No RPC, no KV deallocation, no Mooncake transfer needed.
       if (request->state().local_pd) {
         XLLM_DLOG(INFO) << "[DIAG] Local PD request " << request->request_id()
-                  << " completed prefill, staying in running for decode";
+                        << " completed prefill, staying in running for decode";
         continue;
       }
       request->log_statistic(request->elapsed_seconds());
@@ -602,7 +606,7 @@ void DisaggPDScheduler::prefill_send_first_generation() {
   }
 
   XLLM_DLOG(INFO) << "[DIAG] prefill_send_first_generation: sending "
-            << requests.size() << " requests to decode";
+                  << requests.size() << " requests to decode";
 
   prefill_threadpool_.schedule([this,
                                 requests = std::move(requests)]() mutable {
@@ -691,10 +695,10 @@ void DisaggPDScheduler::prefill_send_first_generation() {
       proto::Status resp;
       brpc::Controller cntl;
       XLLM_DLOG(INFO) << "[DIAG] Sending FirstGeneration RPC for request "
-                << request->request_id();
+                      << request->request_id();
       stub->FirstGeneration(&cntl, &gens, &resp, nullptr);
       XLLM_DLOG(INFO) << "[DIAG] FirstGeneration RPC returned, failed="
-                << cntl.Failed() << ", ok=" << resp.ok();
+                      << cntl.Failed() << ", ok=" << resp.ok();
 
       if (cntl.Failed() || !resp.ok()) {
         LOG(ERROR) << "Failed to send first generation to decode instance : "
