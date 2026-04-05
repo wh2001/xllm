@@ -1021,8 +1021,8 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
   }
 
   if (FLAGS_sleep_initial_model && FLAGS_node_rank == 0 &&
-      !initial_master_slept_.exchange(true) &&
-      master_ != nullptr && !master_->is_sleeping()) {
+      !initial_master_slept_.exchange(true) && master_ != nullptr &&
+      !master_->is_sleeping()) {
     LOG(INFO)
         << "Sleeping initial master (loaded via --model) to free GPU memory";
     master_->get_rate_limiter()->try_set_sleeping();
